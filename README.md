@@ -4,7 +4,7 @@ MATLAB wrapper for [TinyMPC](https://tinympc.org/). It supports code generation 
 
 ## Installation
 
-1. Clone this repo with submodule
+1. Clone this repo with the submodule
 
 ```bash
 git clone --recurse-submodules https://github.com/TinyMPC/TinyMPC-matlab.git

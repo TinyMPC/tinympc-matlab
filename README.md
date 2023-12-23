@@ -10,7 +10,7 @@ MATLAB wrapper for [TinyMPC](https://tinympc.org/). It supports code generation 
 git clone --recurse-submodules https://github.com/TinyMPC/TinyMPC-matlab.git
 ```
 
-2. Run the interactive example `Interactive_cartpole.mlx` under examples.
+2. Run the interactive example `interactive_cartpole.mlx` under examples.
 
 ## Documentation
 

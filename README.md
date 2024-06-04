@@ -1,6 +1,6 @@
 # MATLAB interactive interface for TinyMPC
 
-MATLAB wrapper for [TinyMPC](https://tinympc.org/). It supports code generation and interaction with the C/C++ code.
+MATLAB wrapper for [TinyMPC](https://tinympc.org/). It supports code generation and interaction with the C/C++ code. This was tested on MacOS and Ubuntu.
 
 ## Installation
 

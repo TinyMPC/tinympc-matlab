@@ -9,6 +9,9 @@ function test_cartpole_example()
     
     fprintf('=== Cartpole MPC Example ===\n\n');
     
+    % Setup paths
+    setup_test_paths_cartpole();
+    
     %% Problem Setup
     fprintf('Setting up cartpole MPC problem...\n');
     
@@ -80,14 +83,30 @@ function test_cartpole_example()
     fprintf('  Open-loop eigenvalues: [%.3f, %.3f, %.3f, %.3f]\n', eigs_A);
     fprintf('  Unstable modes: %d\n', unstable_modes);
     
-    % Controllability check
-    C = ctrb(A, B);
-    rank_C = rank(C);
-    fprintf('  Controllability matrix rank: %d/%d\n', rank_C, nx);
-    if rank_C == nx
-        fprintf('  ✓ System is controllable\n');
-    else
-        fprintf('  ✗ System is not controllable\n');
+    % Controllability check (manual implementation to avoid Control System Toolbox dependency)
+    try
+        % Try using Control System Toolbox if available
+        C = ctrb(A, B);
+        rank_C = rank(C);
+        fprintf('  Controllability matrix rank: %d/%d\n', rank_C, nx);
+        if rank_C == nx
+            fprintf('  ✓ System is controllable\n');
+        else
+            fprintf('  ✗ System is not controllable\n');
+        end
+    catch
+        % Manual controllability matrix computation
+        C_manual = B;
+        for i = 1:(nx-1)
+            C_manual = [C_manual, A^i * B];
+        end
+        rank_C = rank(C_manual);
+        fprintf('  Controllability matrix rank: %d/%d (manual computation)\n', rank_C, nx);
+        if rank_C == nx
+            fprintf('  ✓ System is controllable\n');
+        else
+            fprintf('  ✗ System is not controllable\n');
+        end
     end
     
     %% Test Different Scenarios
@@ -201,5 +220,27 @@ function test_cartpole_example()
     fprintf('  1. Compile the TinyMPC MATLAB library\n');
     fprintf('  2. Load the library with solver.load_library()\n');
     fprintf('  3. Uncomment the test code sections above\n');
-    fprintf('  4. Run this script again\n');
+end
+
+function setup_test_paths_cartpole()
+    % SETUP_TEST_PATHS_CARTPOLE - Add necessary paths for cartpole testing
+    %
+    % This function adds the TinyMPC MATLAB wrapper to the MATLAB path
+    % so that the cartpole test can find the TinyMPC class.
+    
+    % Get current directory (tests/) and repository root
+    current_dir = pwd;
+    repo_root = fileparts(current_dir);
+    
+    % Add wrapper directory to path
+    wrapper_dir = fullfile(repo_root, 'src', 'matlab_wrapper');
+    
+    if exist(wrapper_dir, 'dir')
+        addpath(wrapper_dir);
+        fprintf('Added to MATLAB path: %s\n', wrapper_dir);
+    else
+        warning('TinyMPC wrapper directory not found: %s', wrapper_dir);
+        fprintf('Current directory: %s\n', current_dir);
+        fprintf('Repository root: %s\n', repo_root);
+    end
 end

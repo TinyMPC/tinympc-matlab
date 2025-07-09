@@ -9,6 +9,9 @@ function run_all_tests()
     
     fprintf('=== TinyMPC MATLAB Test Suite ===\n\n');
     
+    % Setup paths
+    setup_test_paths();
+    
     % Test configuration
     tests_passed = 0;
     tests_failed = 0;
@@ -295,4 +298,27 @@ function test_codegen_basic()
     output_dir = tempname();
     
     fprintf('    - Codegen interface: OK\n');
+end
+
+function setup_test_paths()
+    % SETUP_TEST_PATHS - Add necessary paths for testing
+    %
+    % This function adds the TinyMPC MATLAB wrapper to the MATLAB path
+    % so that tests can find the TinyMPC class.
+    
+    % Get current directory (tests/) and repository root
+    current_dir = pwd;
+    repo_root = fileparts(current_dir);
+    
+    % Add wrapper directory to path
+    wrapper_dir = fullfile(repo_root, 'src', 'matlab_wrapper');
+    
+    if exist(wrapper_dir, 'dir')
+        addpath(wrapper_dir);
+        fprintf('Added to MATLAB path: %s\n', wrapper_dir);
+    else
+        warning('TinyMPC wrapper directory not found: %s', wrapper_dir);
+        fprintf('Current directory: %s\n', current_dir);
+        fprintf('Repository root: %s\n', repo_root);
+    end
 end

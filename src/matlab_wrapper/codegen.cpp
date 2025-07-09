@@ -20,9 +20,6 @@ int tiny_setup_matlab(void** solver_ptr,
         return -1;
     }
 
-    // Allocate and initialize solver
-    TinySolver* solver = new TinySolver();
-    
     // Convert MATLAB arrays to Eigen matrices
     // MATLAB stores matrices in column-major order, same as Eigen default
     Eigen::Map<tinyMatrix> A_mat(Adyn, nx, nx);
@@ -31,17 +28,17 @@ int tiny_setup_matlab(void** solver_ptr,
     Eigen::Map<tinyMatrix> Q_mat(Q, nx, nx);
     Eigen::Map<tinyMatrix> R_mat(R, nu, nu);
     
-    // Call TinyMPC core setup function
-    int status = tiny_setup(solver, A_mat, B_mat, f_vec, Q_mat, R_mat, rho, N, verbose);
+    // Call TinyMPC core setup function with updated signature
+    TinySolver* solver_instance = nullptr;
+    int status = tiny_setup(&solver_instance, A_mat, B_mat, f_vec, Q_mat, R_mat, rho, nx, nu, N, verbose);
     
     if (status == 0) {
-        *solver_ptr = static_cast<void*>(solver);
+        *solver_ptr = static_cast<void*>(solver_instance);
         if (verbose) {
             std::cout << "Successfully set up TinyMPC solver via MATLAB interface" << std::endl;
             std::cout << "Problem dimensions: nx=" << nx << ", nu=" << nu << ", N=" << N << std::endl;
         }
     } else {
-        delete solver;
         *solver_ptr = nullptr;
         if (verbose) {
             std::cout << "Failed to set up TinyMPC solver: " << status << std::endl;
@@ -137,12 +134,17 @@ int tiny_codegen_with_sensitivity_matlab(void* solver, const char* output_dir,
         std::cout << "Starting MATLAB code generation with sensitivity matrices to directory: " << output_dir << std::endl;
     }
     
-    // Convert MATLAB arrays to Eigen matrices
-    // These dimensions should match what's expected by the core function
-    Eigen::Map<tinyMatrix> dK_mat(dK, nu * nx, N-1);  // Control gain sensitivity
-    Eigen::Map<tinyMatrix> dP_mat(dP, nx * nx, N);    // Cost-to-go sensitivity
-    Eigen::Map<tinyMatrix> dC1_mat(dC1, nu, nx);      // Constraint sensitivity 1
-    Eigen::Map<tinyMatrix> dC2_mat(dC2, nx, nx);      // Constraint sensitivity 2
+    // Convert MATLAB arrays to Eigen matrices and create actual tinyMatrix objects
+    Eigen::Map<tinyMatrix> dK_map(dK, nu * nx, N-1);
+    Eigen::Map<tinyMatrix> dP_map(dP, nx * nx, N);
+    Eigen::Map<tinyMatrix> dC1_map(dC1, nu, nx);
+    Eigen::Map<tinyMatrix> dC2_map(dC2, nx, nx);
+    
+    // Create actual tinyMatrix objects from the maps
+    tinyMatrix dK_mat = dK_map;
+    tinyMatrix dP_mat = dP_map;
+    tinyMatrix dC1_mat = dC1_map;
+    tinyMatrix dC2_mat = dC2_map;
     
     // Call TinyMPC core codegen function with sensitivity
     int status = tiny_codegen_with_sensitivity(tiny_solver, output_dir, 

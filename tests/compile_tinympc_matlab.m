@@ -16,7 +16,7 @@ function compile_tinympc_matlab()
     
     % Get current directory and paths
     current_dir = pwd;
-    [repo_root, ~, ~] = fileparts(fileparts(current_dir));
+    repo_root = fileparts(current_dir);  % tests/ -> repo_root
     wrapper_dir = fullfile(repo_root, 'src', 'matlab_wrapper');
     tinympc_dir = fullfile(repo_root, 'src', 'tinympc', 'TinyMPC');
     
@@ -35,19 +35,19 @@ function compile_tinympc_matlab()
     
     % Source files to compile
     wrapper_files = {
-        fullfile(wrapper_dir, 'wrapper.cpp'),
+        fullfile(wrapper_dir, 'wrapper.cpp');
         fullfile(wrapper_dir, 'codegen.cpp')
     };
     
     tinympc_src_files = {
-        fullfile(tinympc_dir, 'src', 'tinympc', 'tiny_api.cpp'),
-        fullfile(tinympc_dir, 'src', 'tinympc', 'admm.cpp'),
-        fullfile(tinympc_dir, 'src', 'tinympc', 'codegen.cpp'),
+        fullfile(tinympc_dir, 'src', 'tinympc', 'tiny_api.cpp');
+        fullfile(tinympc_dir, 'src', 'tinympc', 'admm.cpp');
+        fullfile(tinympc_dir, 'src', 'tinympc', 'codegen.cpp');
         fullfile(tinympc_dir, 'src', 'tinympc', 'rho_benchmark.cpp')
     };
     
     % Check if source files exist
-    all_files = [wrapper_files, tinympc_src_files];
+    all_files = [wrapper_files; tinympc_src_files];
     fprintf('\nChecking source files:\n');
     for i = 1:length(all_files)
         if exist(all_files{i}, 'file')
@@ -60,8 +60,9 @@ function compile_tinympc_matlab()
     
     % Include directories
     include_dirs = {
-        fullfile(tinympc_dir, 'src'),
-        fullfile(tinympc_dir, 'include'),
+        fullfile(tinympc_dir, 'src'), ...
+        fullfile(tinympc_dir, 'include'), ...
+        fullfile(tinympc_dir, 'include', 'Eigen'), ...
         wrapper_dir
     };
     

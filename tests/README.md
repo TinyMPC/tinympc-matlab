@@ -1,4 +1,4 @@
-# TinyMPC MATLAB Tests
+#1 TinyMPC MATLAB Tests
 
 This directory contains comprehensive tests for the TinyMPC MATLAB interface.
 

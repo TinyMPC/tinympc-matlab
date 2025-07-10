@@ -124,6 +124,15 @@ function compile_tinympc_matlab()
         % Check output
         if exist('tinympc_matlab.mexa64', 'file')
             fprintf('✓ Created: tinympc_matlab.mexa64\n');
+            
+            % Copy to examples folder
+            examples_dir = fullfile(repo_root, 'examples');
+            if exist(examples_dir, 'dir')
+                copyfile('tinympc_matlab.mexa64', examples_dir);
+                fprintf('✓ Copied MEX file to examples directory\n');
+            else
+                fprintf('⚠ Examples directory not found, MEX file not copied\n');
+            end
         else
             fprintf('⚠ Output file not found\n');
         end
@@ -149,7 +158,7 @@ function compile_tinympc_matlab()
     end
 end
 
-function compile_tinympc_static(tinympc_dir)
+function compile_tinympc_static(~)
     % Compile TinyMPC as a static library (following Python's approach)
     fprintf('Building TinyMPC static library...\n');
     

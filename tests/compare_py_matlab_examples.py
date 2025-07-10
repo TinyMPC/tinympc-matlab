@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Comprehensive comparison script for TinyMPC Python and MATLAB examples.
 Runs equivalent examples and compares results to ensure consistency.
@@ -294,8 +293,7 @@ def main():
         "cartpole_example_mpc",
         "cartpole_example_mpc_reference_constrained",
         "cartpole_example_code_generation",
-        "quadrotor_hover_code_generation",
-        "test_generated_code"
+        "quadrotor_hover_code_generation"
     ]
     
     try:

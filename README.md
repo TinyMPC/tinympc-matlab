@@ -2,12 +2,6 @@
 
 MATLAB wrapper for [TinyMPC](https://tinympc.org/). It supports code generation and interaction with the C/C++ code. This has been tested on Ubuntu and macOS.
 
-## Installation
-
-### Prerequisites
-
-Make sure you have Eigen installed:
-
 ### Prerequisites
 
 **Required for all platforms:**

@@ -2,6 +2,7 @@
 *.avi
 generated_code*/
 *.tmp
+examples/out/
 
 # Windows default autosave extension
 *.asv

@@ -1,470 +1,257 @@
-#include "wrapper.hpp"
-#include "../tinympc/TinyMPC/src/tinympc/tiny_api.hpp"
-#include "../tinympc/TinyMPC/src/tinympc/types.hpp"
+#include "mex.h"
+#include "matrix.h"
 #include <iostream>
+#include <cstring>
+#include <memory>
 
-// Global solver pointer, probably a better way to do this
-static TinySolver* g_solver = nullptr;
+// Fix the Eigen include issue by using the standard approach
+#include <Eigen/Dense>
+#include <Eigen/Core>
 
-// EXAMPLE IMPLEMENTATION: set_x0
-void set_x0(double *x0, int verbose) {
-    if (g_solver == nullptr) {
-        if (verbose) {
-            std::cout << "Error: Solver not initialized. Call setup first." << std::endl;
-        }
-        return;
+// Now include TinyMPC headers (after Eigen is properly included)
+#include "tinympc/tiny_api.hpp"
+#include "tinympc/types.hpp"
+
+// Global solver pointer - in a full implementation, this should be managed better
+static std::unique_ptr<TinySolver> g_solver = nullptr;
+
+// Helper function to convert MATLAB array to Eigen matrix
+Eigen::MatrixXd matlab_to_eigen(const mxArray* mx_array) {
+    if (!mxIsDouble(mx_array) || mxIsComplex(mx_array)) {
+        mexErrMsgIdAndTxt("TinyMPC:InvalidInput", "Input must be a real double array");
     }
     
-    if (x0 == nullptr) {
-        if (verbose) {
-            std::cout << "Error: x0 array is null." << std::endl;
-        }
-        return;
+    size_t rows = mxGetM(mx_array);
+    size_t cols = mxGetN(mx_array);
+    double* data = mxGetPr(mx_array);
+    
+    return Eigen::Map<Eigen::MatrixXd>(data, rows, cols);
+}
+
+// Helper function to convert Eigen matrix to MATLAB array
+mxArray* eigen_to_matlab(const Eigen::MatrixXd& eigen_mat) {
+    size_t rows = eigen_mat.rows();
+    size_t cols = eigen_mat.cols();
+    
+    mxArray* mx_array = mxCreateDoubleMatrix(rows, cols, mxREAL);
+    double* data = mxGetPr(mx_array);
+    
+    // Copy data (Eigen is column-major, MATLAB is column-major, so direct copy)
+    std::memcpy(data, eigen_mat.data(), rows * cols * sizeof(double));
+    
+    return mx_array;
+}
+
+// Setup function - initialize the solver
+void setup_solver(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
+    // Expected arguments: A, B, fdyn, Q, R, rho, nx, nu, N, x_min, x_max, u_min, u_max, verbose
+    if (nrhs != 15) {
+        mexErrMsgIdAndTxt("TinyMPC:InvalidInput", "Setup requires 14 input arguments");
     }
     
-    // Convert double array to Eigen vector
-    int nx = g_solver->work->nx;
+    // Extract matrices
+    auto A = matlab_to_eigen(prhs[1]);
+    auto B = matlab_to_eigen(prhs[2]);
+    auto fdyn = matlab_to_eigen(prhs[3]);
+    auto Q = matlab_to_eigen(prhs[4]);
+    auto R = matlab_to_eigen(prhs[5]);
     
-    // Create Eigen map from the double array
-    Eigen::Map<tinyVector> x0_vec(x0, nx);
+    // Extract scalar parameters
+    double rho = mxGetScalar(prhs[6]);
+    int nx = (int)mxGetScalar(prhs[7]);
+    int nu = (int)mxGetScalar(prhs[8]);
+    int N = (int)mxGetScalar(prhs[9]);
     
-    // Call the TinyMPC core function
-    int status = tiny_set_x0(g_solver, x0_vec);
+    // Extract bound matrices
+    auto x_min = matlab_to_eigen(prhs[10]);
+    auto x_max = matlab_to_eigen(prhs[11]);
+    auto u_min = matlab_to_eigen(prhs[12]);
+    auto u_max = matlab_to_eigen(prhs[13]);
+    
+    int verbose = (int)mxGetScalar(prhs[14]);
     
     if (verbose) {
-        if (status == 0) {
-            std::cout << "Successfully set initial state x0" << std::endl;
-        } else {
-            std::cout << "Error setting initial state: " << status << std::endl;
+        mexPrintf("Setting up TinyMPC solver with nx=%d, nu=%d, N=%d, rho=%f\n", nx, nu, N, rho);
+    }
+    
+    try {
+        // Create solver
+        TinySolver* solver_ptr = nullptr;
+        
+        // Convert Eigen matrices to tinyMatrix (assuming tinyMatrix is Eigen::MatrixXd)
+        tinyMatrix A_tiny = A.cast<tinytype>();
+        tinyMatrix B_tiny = B.cast<tinytype>();
+        tinyMatrix fdyn_tiny = fdyn.cast<tinytype>();
+        tinyMatrix Q_tiny = Q.cast<tinytype>();
+        tinyMatrix R_tiny = R.cast<tinytype>();
+        
+        // Setup solver
+        int status = tiny_setup(&solver_ptr, A_tiny, B_tiny, fdyn_tiny, Q_tiny, R_tiny, 
+                               (tinytype)rho, nx, nu, N, verbose);
+        
+        if (status != 0) {
+            mexErrMsgIdAndTxt("TinyMPC:SetupFailed", "tiny_setup failed with status %d", status);
         }
+        
+        // Set bounds
+        tinyMatrix x_min_tiny = x_min.cast<tinytype>();
+        tinyMatrix x_max_tiny = x_max.cast<tinytype>();
+        tinyMatrix u_min_tiny = u_min.cast<tinytype>();
+        tinyMatrix u_max_tiny = u_max.cast<tinytype>();
+        
+        status = tiny_set_bound_constraints(solver_ptr, x_min_tiny, x_max_tiny, u_min_tiny, u_max_tiny);
+        
+        if (status != 0) {
+            mexErrMsgIdAndTxt("TinyMPC:BoundsFailed", "tiny_set_bound_constraints failed with status %d", status);
+        }
+        
+        // Store solver (transfer ownership)
+        g_solver.reset(solver_ptr);
+        
+        if (verbose) {
+            mexPrintf("TinyMPC solver setup successful\n");
+        }
+        
+        // Return status
+        plhs[0] = mxCreateDoubleScalar(0);
+        
+    } catch (const std::exception& e) {
+        mexErrMsgIdAndTxt("TinyMPC:SetupError", "Setup failed: %s", e.what());
     }
 }
 
-void call_tiny_solve(int verbose) {
-    if(g_solver == nullptr) {
-        if (verbose) {
-            std::cout << "Error: Solver not initialized. Call setup first." << std::endl;
-        }
-        return;
+// Set initial state
+void set_x0(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
+    if (nrhs != 3) {
+        mexErrMsgIdAndTxt("TinyMPC:InvalidInput", "set_x0 requires 2 input arguments");
     }
-    int status = tiny_solve(g_solver);
-    if (verbose) {
-        if (status == 0) {
-            std::cout << "Successfully called tiny_solve" << std::endl;
-        } else {
-            std::cout << "Error calling tiny_solve: " << status << std::endl;
+    
+    if (!g_solver) {
+        mexErrMsgIdAndTxt("TinyMPC:NotInitialized", "Solver not initialized. Call setup first.");
+    }
+    
+    auto x0 = matlab_to_eigen(prhs[1]);
+    int verbose = (int)mxGetScalar(prhs[2]);
+    
+    try {
+        tinyVector x0_tiny = x0.cast<tinytype>();
+        int status = tiny_set_x0(g_solver.get(), x0_tiny);
+        
+        if (status != 0) {
+            mexErrMsgIdAndTxt("TinyMPC:SetX0Failed", "tiny_set_x0 failed with status %d", status);
         }
+        
+        if (verbose) {
+            mexPrintf("Initial state set successfully\n");
+        }
+        
+    } catch (const std::exception& e) {
+        mexErrMsgIdAndTxt("TinyMPC:SetX0Error", "set_x0 failed: %s", e.what());
     }
 }
 
-void get_x(double *x_soln, int verbose) {
-    if (g_solver == nullptr) {
-        if (verbose) {
-            std::cout << "Error: Solver not initialized. Call setup first." << std::endl;
-        }
-        return;
+// Solve the problem
+void solve_problem(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
+    if (nrhs != 2) {
+        mexErrMsgIdAndTxt("TinyMPC:InvalidInput", "solve requires 1 input argument");
     }
     
-    if (x_soln == nullptr) {
-        if (verbose) {
-            std::cout << "Error: x_soln array is null." << std::endl;
-        }
-        return;
+    if (!g_solver) {
+        mexErrMsgIdAndTxt("TinyMPC:NotInitialized", "Solver not initialized. Call setup first.");
     }
     
-    if (g_solver->solution == nullptr) {
+    int verbose = (int)mxGetScalar(prhs[1]);
+    
+    try {
         if (verbose) {
-            std::cout << "Error: No solution available. Call solve first." << std::endl;
+            mexPrintf("Solving MPC problem...\n");
         }
-        return;
-    }
-    
-    // Get problem dimensions
-    int nx = g_solver->work->nx;
-    int N = g_solver->work->N;
-    
-    // Create Eigen map for the output array (MATLAB will allocate this)
-    Eigen::Map<tinyMatrix> x_soln_mat(x_soln, nx, N);
-    
-    // Copy solution matrix to output
-    x_soln_mat = g_solver->solution->x;
-    
-    if (verbose) {
-        std::cout << "Successfully retrieved state trajectory" << std::endl;
-        std::cout << "State matrix size: " << nx << " x " << N << std::endl;
-        std::cout << "First state: [" << g_solver->solution->x.col(0).transpose() << "]" << std::endl;
+        
+        int status = tiny_solve(g_solver.get());
+        
+        if (verbose) {
+            mexPrintf("Solver finished with status %d\n", status);
+        }
+        
+    } catch (const std::exception& e) {
+        mexErrMsgIdAndTxt("TinyMPC:SolveError", "solve failed: %s", e.what());
     }
 }
 
-void get_u(double *u_soln, int verbose) {
-    if (g_solver == nullptr) {
-        if (verbose) {
-            std::cout << "Error: Solver not initialized. Call setup first." << std::endl;
-        }
-        return;
+// Get solution
+void get_solution(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
+    if (nrhs != 1) {
+        mexErrMsgIdAndTxt("TinyMPC:InvalidInput", "get_solution requires no input arguments");
     }
     
-    if (u_soln == nullptr) {
-        if (verbose) {
-            std::cout << "Error: u_soln array is null." << std::endl;
-        }
-        return;
+    if (!g_solver) {
+        mexErrMsgIdAndTxt("TinyMPC:NotInitialized", "Solver not initialized. Call setup first.");
     }
     
-    if (g_solver->solution == nullptr) {
-        if (verbose) {
-            std::cout << "Error: No solution available. Call solve first." << std::endl;
-        }
-        return;
+    if (!g_solver->solution) {
+        mexErrMsgIdAndTxt("TinyMPC:NoSolution", "No solution available. Call solve first.");
     }
     
-    // Get problem dimensions
-    int nu = g_solver->work->nu;
-    int N = g_solver->work->N;
-    
-    // Create Eigen map for the output array (MATLAB will allocate this)
-    Eigen::Map<tinyMatrix> u_soln_mat(u_soln, nu, N - 1);
-    
-    // Copy solution matrix to output
-    u_soln_mat = g_solver->solution->u;
-    
-    if (verbose) {
-        std::cout << "Successfully retrieved control trajectory" << std::endl;
-        std::cout << "Control matrix size: " << nu << " x " << (N - 1) << std::endl;
-        std::cout << "First control: [" << g_solver->solution->u.col(0).transpose() << "]" << std::endl;
+    try {
+        // Return x_sol, u_sol, solved, iter
+        if (nlhs >= 1) {
+            // Convert solution matrices back to double and return
+            Eigen::MatrixXd x_sol = g_solver->solution->x.cast<double>();
+            plhs[0] = eigen_to_matlab(x_sol);
+        }
+        
+        if (nlhs >= 2) {
+            Eigen::MatrixXd u_sol = g_solver->solution->u.cast<double>();
+            plhs[1] = eigen_to_matlab(u_sol);
+        }
+        
+        if (nlhs >= 3) {
+            plhs[2] = mxCreateLogicalScalar(g_solver->solution->solved);
+        }
+        
+        if (nlhs >= 4) {
+            plhs[3] = mxCreateDoubleScalar(g_solver->solution->iter);
+        }
+        
+    } catch (const std::exception& e) {
+        mexErrMsgIdAndTxt("TinyMPC:GetSolutionError", "get_solution failed: %s", e.what());
     }
 }
 
-void set_x_ref(double *x_ref, int verbose) {
-    if (g_solver == nullptr) {
-        if (verbose) {
-            std::cout << "Error: Solver not initialized. Call setup first." << std::endl;
-        }
-        return;
-    }
-    
-    if (x_ref == nullptr) {
-        if (verbose) {
-            std::cout << "Error: x_ref array is null." << std::endl;
-        }
-        return;
-    }
-    
-    // Get problem dimensions
-    int nx = g_solver->work->nx;
-    int N = g_solver->work->N;
-    
-    // Convert double array to Eigen matrix (nx x N)
-    // MATLAB stores matrices in column-major order, same as Eigen
-    Eigen::Map<tinyMatrix> x_ref_mat(x_ref, nx, N);
-    
-    // Call the TinyMPC core function
-    int status = tiny_set_x_ref(g_solver, x_ref_mat);
-    
-    if (verbose) {
-        if (status == 0) {
-            std::cout << "Successfully set state reference trajectory" << std::endl;
-            std::cout << "Reference matrix size: " << nx << " x " << N << std::endl;
-        } else {
-            std::cout << "Error setting state reference: " << status << std::endl;
-        }
+// Cleanup
+void cleanup_solver(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
+    if (g_solver) {
+        g_solver.reset();
+        mexPrintf("TinyMPC solver cleaned up\n");
     }
 }
 
-void set_u_ref(double *u_ref, int verbose) {
-    if (g_solver == nullptr) {
-        if (verbose) {
-            std::cout << "Error: Solver not initialized. Call setup first." << std::endl;
-        }
-        return;
-    }
-
-    if (u_ref == nullptr) {
-        if (verbose) {
-            std::cout << "Error: u_ref array is null." << std::endl;
-        }
-        return;
-    }
-
-    // Get problem dimensions
-    int nu = g_solver->work->nu;
-    int N = g_solver->work->N;
-
-    // Convert double array to Eigen matrix (nu x N-1)
-    // MATLAB stores matrices in column-major order, same as Eigen
-    Eigen::Map<tinyMatrix> u_ref_mat(u_ref, nu, N-1);
-
-    // Call the TinyMPC core function
-    int status = tiny_set_u_ref(g_solver, u_ref_mat);
-    
-    if (verbose) {
-        if (status == 0) {
-            std::cout << "Successfully set control reference trajectory" << std::endl;
-            std::cout << "Reference matrix size: " << nu << " x " << N-1 << std::endl;
-        } else {
-            std::cout << "Error setting control reference: " << status << std::endl;
-        }
-    }
-}
-
-void set_bound_constraints(double *x_min, double *x_max, 
-                          double *u_min, double *u_max, int verbose) {
-    if (g_solver == nullptr) {
-        if (verbose) {
-            std::cout << "Error: Solver not initialized. Call setup first." << std::endl;
-        }
-        return;
-    }
-
-    if (x_min == nullptr || x_max == nullptr || u_min == nullptr || u_max == nullptr) {
-        if (verbose) {
-            std::cout << "Error: One or more constraint arrays are null." << std::endl;
-        }
-        return;
-    }
-
-    int nx = g_solver->work->nx;  // State dimension    
-    int nu = g_solver->work->nu;  // Control dimension
-    int N = g_solver->work->N;    // Horizon length
-
-    // Convert arrays to Eigen matrices
-    Eigen::Map<tinyMatrix> x_min_mat(x_min, nx, N);
-    Eigen::Map<tinyMatrix> x_max_mat(x_max, nx, N);
-    Eigen::Map<tinyMatrix> u_min_mat(u_min, nu, N-1);
-    Eigen::Map<tinyMatrix> u_max_mat(u_max, nu, N-1);
-
-    // Call the TinyMPC core function
-    int status = tiny_set_bound_constraints(g_solver, x_min_mat, x_max_mat, u_min_mat, u_max_mat);
-
-    if (verbose) {
-        if (status == 0) {
-            std::cout << "Successfully set bound constraints" << std::endl;
-        } else {
-            std::cout << "Error setting bound constraints: " << status << std::endl;
-        }
-    }
-}
-
-void set_sensitivity_matrices(double *dK, double *dP, 
-                             double *dC1, double *dC2, int verbose) {
-    if (g_solver == nullptr) {
-        if (verbose) {
-            std::cout << "Error: Solver not initialized. Call setup first." << std::endl;
-        }
-        return;
+// Main MEX function
+void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
+    if (nrhs < 1) {
+        mexErrMsgIdAndTxt("TinyMPC:InvalidInput", "At least one input argument required");
     }
     
-    if (g_solver->cache == nullptr) {
-        if (verbose) {
-            std::cout << "Error: Solver cache not initialized." << std::endl;
-        }
-        return;
+    if (!mxIsChar(prhs[0])) {
+        mexErrMsgIdAndTxt("TinyMPC:InvalidInput", "First argument must be a string");
     }
     
-    // Get problem dimensions
-    int nx = g_solver->work->nx;
-    int nu = g_solver->work->nu;
-    int N = g_solver->work->N;
+    // Get command string
+    char* command = mxArrayToString(prhs[0]);
     
-    // Convert arrays to Eigen matrices and store in cache
-    // Based on Python bindings approach: create copies and store for code generation
-    
-    if (dK != nullptr) {
-        // dK: Control gain sensitivity (nu x nx for each time step)
-        // Assuming flattened format: nu*nx rows, N-1 columns
-        Eigen::Map<tinyMatrix> dK_mat(dK, nu * nx, N-1);
-        g_solver->cache->dKinf_drho = dK_mat;
-        if (verbose) {
-            std::cout << "Set dK sensitivity matrix (" << nu*nx << " x " << N-1 << ")" << std::endl;
-            std::cout << "dK norm: " << dK_mat.norm() << std::endl;
-        }
+    if (strcmp(command, "setup") == 0) {
+        setup_solver(nlhs, plhs, nrhs, prhs);
+    } else if (strcmp(command, "set_x0") == 0) {
+        set_x0(nlhs, plhs, nrhs, prhs);
+    } else if (strcmp(command, "solve") == 0) {
+        solve_problem(nlhs, plhs, nrhs, prhs);
+    } else if (strcmp(command, "get_solution") == 0) {
+        get_solution(nlhs, plhs, nrhs, prhs);
+    } else if (strcmp(command, "cleanup") == 0) {
+        cleanup_solver(nlhs, plhs, nrhs, prhs);
+    } else {
+        mexErrMsgIdAndTxt("TinyMPC:InvalidCommand", "Unknown command: %s", command);
     }
     
-    if (dP != nullptr) {
-        // dP: Cost-to-go sensitivity (nx x nx for each time step)
-        // Assuming flattened format: nx*nx rows, N columns  
-        Eigen::Map<tinyMatrix> dP_mat(dP, nx * nx, N);
-        g_solver->cache->dPinf_drho = dP_mat;
-        if (verbose) {
-            std::cout << "Set dP sensitivity matrix (" << nx*nx << " x " << N << ")" << std::endl;
-            std::cout << "dP norm: " << dP_mat.norm() << std::endl;
-        }
-    }
-    
-    if (dC1 != nullptr) {
-        // dC1: Constraint sensitivity matrix 1
-        // Dimensions depend on constraint structure - use cache C1 size as reference
-        Eigen::Map<tinyMatrix> dC1_mat(dC1, nu, nx);  // Assuming nu x nx like Kinf
-        g_solver->cache->dC1_drho = dC1_mat;
-        if (verbose) {
-            std::cout << "Set dC1 sensitivity matrix (" << nu << " x " << nx << ")" << std::endl;
-            std::cout << "dC1 norm: " << dC1_mat.norm() << std::endl;
-        }
-    }
-    
-    if (dC2 != nullptr) {
-        // dC2: Constraint sensitivity matrix 2
-        // Dimensions depend on constraint structure - use cache C2 size as reference
-        Eigen::Map<tinyMatrix> dC2_mat(dC2, nx, nx);  // Assuming nx x nx like AmBKt
-        g_solver->cache->dC2_drho = dC2_mat;
-        if (verbose) {
-            std::cout << "Set dC2 sensitivity matrix (" << nx << " x " << nx << ")" << std::endl;
-            std::cout << "dC2 norm: " << dC2_mat.norm() << std::endl;
-        }
-    }
-    
-    if (verbose) {
-        std::cout << "Sensitivity matrices set for adaptive rho and code generation" << std::endl;
-        std::cout << "These matrices will be used for:" << std::endl;
-        std::cout << "  - Adaptive rho updates during solve" << std::endl;
-        std::cout << "  - Code generation with sensitivity information" << std::endl;
-    }
-}
-
-void set_cache_terms(double *Kinf, double *Pinf, 
-                    double *Quu_inv, double *AmBKt, int verbose) {
-    if (g_solver == nullptr) {
-        if (verbose) {
-            std::cout << "Error: Solver not initialized. Call setup first." << std::endl;
-        }
-        return;
-    }
-    
-    if (g_solver->cache == nullptr) {
-        if (verbose) {
-            std::cout << "Error: Solver cache not initialized." << std::endl;
-        }
-        return;
-    }
-    
-    // Get problem dimensions
-    int nx = g_solver->work->nx;
-    int nu = g_solver->work->nu;
-    
-    // Convert arrays to Eigen matrices and set cache terms
-    
-    // Kinf: Infinite horizon feedback gain (nu x nx)
-    if (Kinf != nullptr) {
-        Eigen::Map<tinyMatrix> Kinf_mat(Kinf, nu, nx);
-        g_solver->cache->Kinf = Kinf_mat;
-        if (verbose) {
-            std::cout << "Set Kinf (" << nu << " x " << nx << ")" << std::endl;
-        }
-    }
-    
-    // Pinf: Infinite horizon cost-to-go (nx x nx)
-    if (Pinf != nullptr) {
-        Eigen::Map<tinyMatrix> Pinf_mat(Pinf, nx, nx);
-        g_solver->cache->Pinf = Pinf_mat;
-        if (verbose) {
-            std::cout << "Set Pinf (" << nx << " x " << nx << ")" << std::endl;
-        }
-    }
-    
-    // Quu_inv: Inverted control cost matrix (nu x nu)
-    if (Quu_inv != nullptr) {
-        Eigen::Map<tinyMatrix> Quu_inv_mat(Quu_inv, nu, nu);
-        g_solver->cache->Quu_inv = Quu_inv_mat;
-        if (verbose) {
-            std::cout << "Set Quu_inv (" << nu << " x " << nu << ")" << std::endl;
-        }
-    }
-    
-    // AmBKt: A - B*K transpose (nx x nx)
-    if (AmBKt != nullptr) {
-        Eigen::Map<tinyMatrix> AmBKt_mat(AmBKt, nx, nx);
-        g_solver->cache->AmBKt = AmBKt_mat;
-        if (verbose) {
-            std::cout << "Set AmBKt (" << nx << " x " << nx << ")" << std::endl;
-        }
-    }
-    
-    if (verbose) {
-        std::cout << "Successfully updated solver cache terms" << std::endl;
-    }
-}
-
-void reset_dual_variables(int verbose) {
-    if (g_solver == nullptr) {
-        if (verbose) {
-            std::cout << "Error: Solver not initialized. Call setup first." << std::endl;
-        }
-        return;
-    }
-    
-    if (g_solver->work == nullptr) {
-        if (verbose) {
-            std::cout << "Error: Solver workspace not initialized." << std::endl;
-        }
-        return;
-    }
-    
-    // Reset all dual variables to zero (manual implementation since no core function exists)
-    // Based on TinyWorkspace structure in types.hpp
-    
-    // Bound constraint dual variables
-    g_solver->work->g.setZero();  // State dual variables (nx x N)
-    g_solver->work->y.setZero();  // Input dual variables (nu x N-1)
-    
-    // Cone constraint dual variables (if applicable)
-    if (g_solver->work->numStateCones > 0 || g_solver->work->numInputCones > 0) {
-        g_solver->work->gc.setZero();  // State cone dual variables (nx x N)
-        g_solver->work->yc.setZero();  // Input cone dual variables (nu x N-1)
-    }
-    
-    // Linear constraint dual variables (if applicable)
-    if (g_solver->work->numStateLinear > 0 || g_solver->work->numInputLinear > 0) {
-        g_solver->work->gl.setZero();  // State linear dual variables (nx x N)
-        g_solver->work->yl.setZero();  // Input linear dual variables (nu x N-1)
-    }
-    
-    // Reset solve status
-    g_solver->work->iter = 0;
-    g_solver->work->status = 0;
-    
-    if (verbose) {
-        std::cout << "Successfully reset all ADMM dual variables to zero" << std::endl;
-        std::cout << "Reset g (state duals): " << g_solver->work->nx << " x " << g_solver->work->N << std::endl;
-        std::cout << "Reset y (input duals): " << g_solver->work->nu << " x " << (g_solver->work->N - 1) << std::endl;
-        if (g_solver->work->numStateCones > 0 || g_solver->work->numInputCones > 0) {
-            std::cout << "Reset cone constraint dual variables" << std::endl;
-        }
-        if (g_solver->work->numStateLinear > 0 || g_solver->work->numInputLinear > 0) {
-            std::cout << "Reset linear constraint dual variables" << std::endl;
-        }
-    }
-}
-
-int get_solver_status(int verbose) {
-    if(g_solver == nullptr) {
-        if (verbose) {
-            std::cout << "Error: Solver not initialized. Call setup first." << std::endl;
-        }
-        return -1;
-    }
-
-    if(g_solver->solution == nullptr) {
-        if (verbose) {
-            std::cout << "Error: No solution available. Call solve first." << std::endl;
-        }
-        return -1;
-    }
-
-    return g_solver->solution->solved;
-}
-
-int get_solver_iterations(int verbose) {
-    if(g_solver == nullptr) {
-        if (verbose) {
-            std::cout << "Error: Solver not initialized. Call setup first." << std::endl;
-        }
-        return -1;
-    }
-    if(g_solver->solution == nullptr) {
-        if (verbose) {
-            std::cout << "Error: No solution available. Call solve first." << std::endl;
-        }
-        return -1;
-    }
-    return g_solver->solution->iter;
+    mxFree(command);
 }

@@ -47,7 +47,7 @@ function compile_tinympc_matlab()
     
     % Essential source files (following Python structure)
     source_files = {
-        fullfile(wrapper_dir, 'wrapper.cpp');
+        fullfile(wrapper_dir, 'bindings.cpp');
     };
     
     % TinyMPC library files (pre-compiled)

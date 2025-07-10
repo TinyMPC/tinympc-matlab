@@ -1,6 +1,7 @@
 .DS_Store
 *.avi
 generated_code*/
+generated_quadrotor_code/
 *.tmp
 examples/out/
 

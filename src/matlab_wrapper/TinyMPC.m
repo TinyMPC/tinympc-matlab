@@ -14,6 +14,18 @@ classdef TinyMPC < handle
         B = []; % Input matrix (nx x nu)
         Q = []; % State cost matrix (nx x nx)
         R = []; % Input cost matrix (nu x nu)
+        
+        % Adaptive rho parameters
+        adaptive_rho = false; % Enable adaptive rho
+        adaptive_rho_min = 0.1; % Minimum rho value
+        adaptive_rho_max = 10.0; % Maximum rho value
+        adaptive_rho_enable_clipping = true; % Enable rho clipping
+        
+        % Sensitivity matrices for adaptive rho
+        dK = []; % Derivative of feedback gain w.r.t. rho
+        dP = []; % Derivative of value function w.r.t. rho
+        dC1 = []; % Derivative of first cache matrix w.r.t. rho
+        dC2 = []; % Derivative of second cache matrix w.r.t. rho
     end
     
     methods
@@ -91,6 +103,12 @@ classdef TinyMPC < handle
             %   'u_min' - Input lower bounds (scalar, nu x 1, or nu x (N-1))
             %   'u_max' - Input upper bounds (scalar, nu x 1, or nu x (N-1))
             %
+            %   Adaptive rho parameters:
+            %   'adaptive_rho' - Enable adaptive rho (logical), defaults to false
+            %   'adaptive_rho_min' - Minimum rho value (positive scalar), defaults to 0.1
+            %   'adaptive_rho_max' - Maximum rho value (positive scalar), defaults to 10.0
+            %   'adaptive_rho_enable_clipping' - Enable rho clipping (logical), defaults to true
+            %
             % Returns:
             %   success - true if setup was successful, false otherwise
             %
@@ -119,6 +137,12 @@ classdef TinyMPC < handle
                 addParameter(p, 'u_min', [], @(x) obj.validate_bounds(x, obj.nu, obj.N-1, 'u_min'));
                 addParameter(p, 'u_max', [], @(x) obj.validate_bounds(x, obj.nu, obj.N-1, 'u_max'));
                 
+                % Adaptive rho parameters
+                addParameter(p, 'adaptive_rho', false, @(x) obj.validate_logical(x, 'adaptive_rho'));
+                addParameter(p, 'adaptive_rho_min', 0.1, @(x) obj.validate_scalar_positive(x, 'adaptive_rho_min'));
+                addParameter(p, 'adaptive_rho_max', 10.0, @(x) obj.validate_scalar_positive(x, 'adaptive_rho_max'));
+                addParameter(p, 'adaptive_rho_enable_clipping', true, @(x) obj.validate_logical(x, 'adaptive_rho_enable_clipping'));
+                
                 parse(p, varargin{:});
                 
                 % Extract validated parameters
@@ -126,15 +150,22 @@ classdef TinyMPC < handle
                 rho = p.Results.rho;
                 verbose = p.Results.verbose;
                 
+                % Store adaptive rho parameters
+                obj.adaptive_rho = p.Results.adaptive_rho;
+                obj.adaptive_rho_min = p.Results.adaptive_rho_min;
+                obj.adaptive_rho_max = p.Results.adaptive_rho_max;
+                obj.adaptive_rho_enable_clipping = p.Results.adaptive_rho_enable_clipping;
+                
                 % Process constraint bounds with intelligent defaults
                 x_min = obj.process_bounds(p.Results.x_min, obj.nx, obj.N, -1e17, 'x_min');
                 x_max = obj.process_bounds(p.Results.x_max, obj.nx, obj.N, +1e17, 'x_max');
                 u_min = obj.process_bounds(p.Results.u_min, obj.nu, obj.N-1, -1e17, 'u_min');
                 u_max = obj.process_bounds(p.Results.u_max, obj.nu, obj.N-1, +1e17, 'u_max');
                 
-                % Call MEX setup function
+                % Call MEX setup function with adaptive rho parameters
                 status = tinympc_matlab('setup', obj.A, obj.B, f, obj.Q, obj.R, ...
-                    rho, obj.nx, obj.nu, obj.N, x_min, x_max, u_min, u_max, verbose);
+                    rho, obj.nx, obj.nu, obj.N, x_min, x_max, u_min, u_max, verbose, ...
+                    obj.adaptive_rho, obj.adaptive_rho_min, obj.adaptive_rho_max, obj.adaptive_rho_enable_clipping);
                 
                 if status == 0
                     obj.is_setup = true;
@@ -366,6 +397,188 @@ classdef TinyMPC < handle
             end
         end
         
+        function success = codegen_with_sensitivity(obj, output_dir, dK, dP, dC1, dC2)
+            % Generate standalone C++ code with sensitivity matrices
+            %
+            % Arguments:
+            %   output_dir - Directory to save generated code
+            %   dK - Derivative of feedback gain w.r.t. rho (nu x nx)
+            %   dP - Derivative of value function w.r.t. rho (nx x nx)
+            %   dC1 - Derivative of first cache matrix w.r.t. rho (nu x nu)
+            %   dC2 - Derivative of second cache matrix w.r.t. rho (nx x nx)
+            %
+            % Returns:
+            %   success - true if successful, false otherwise
+            
+            obj.check_setup();
+            
+            % Validate sensitivity matrices
+            obj.validate_sensitivity_matrices(dK, dP, dC1, dC2);
+            
+            % Set sensitivity matrices
+            obj.set_sensitivity_matrices(dK, dP, dC1, dC2);
+            
+            try
+                status = tinympc_matlab('codegen_with_sensitivity', output_dir, dK, dP, dC1, dC2, false);
+                success = (status == 0);
+                
+                if success
+                    fprintf('Code generation with sensitivity matrices completed successfully in: %s\n', output_dir);
+                end
+                
+            catch ME
+                success = false;
+                error('TinyMPC:CodegenWithSensitivityFailed', ...
+                    'Code generation with sensitivity matrices failed: %s', ME.message);
+            end
+        end
+        
+        function success = set_sensitivity_matrices(obj, dK, dP, dC1, dC2)
+            % Set sensitivity matrices for adaptive rho behavior
+            %
+            % Arguments:
+            %   dK - Derivative of feedback gain w.r.t. rho (nu x nx)
+            %   dP - Derivative of value function w.r.t. rho (nx x nx)
+            %   dC1 - Derivative of first cache matrix w.r.t. rho (nu x nu)
+            %   dC2 - Derivative of second cache matrix w.r.t. rho (nx x nx)
+            %
+            % Returns:
+            %   success - true if successful, false otherwise
+            
+            obj.check_setup();
+            
+            % Validate sensitivity matrices
+            obj.validate_sensitivity_matrices(dK, dP, dC1, dC2);
+            
+            % Store sensitivity matrices
+            obj.dK = dK;
+            obj.dP = dP;
+            obj.dC1 = dC1;
+            obj.dC2 = dC2;
+            
+            try
+                tinympc_matlab('set_sensitivity_matrices', dK, dP, dC1, dC2, false);
+                success = true;
+                
+                fprintf('Sensitivity matrices set with norms: dK=%.6f, dP=%.6f, dC1=%.6f, dC2=%.6f\n', ...
+                    norm(dK), norm(dP), norm(dC1), norm(dC2));
+                
+            catch ME
+                success = false;
+                error('TinyMPC:SetSensitivityMatricesFailed', ...
+                    'Failed to set sensitivity matrices: %s', ME.message);
+            end
+        end
+        
+        function [Kinf, Pinf, Quu_inv, AmBKt] = compute_cache_terms(obj)
+            % Compute cache terms for ADMM solver
+            %
+            % Returns:
+            %   Kinf - Infinite horizon feedback gain (nu x nx)
+            %   Pinf - Infinite horizon value function (nx x nx)
+            %   Quu_inv - Inverse of Quu matrix (nu x nu)
+            %   AmBKt - Transpose of (A - B*K) (nx x nx)
+            
+            obj.check_setup();
+            
+            try
+                % Get current rho value (use default if not set)
+                rho = 1.0; % Default rho value
+                
+                % Add rho regularization
+                Q_rho = obj.Q + rho * eye(obj.nx);
+                R_rho = obj.R + rho * eye(obj.nu);
+                
+                % Initialize
+                Kinf = zeros(obj.nu, obj.nx);
+                Pinf = obj.Q;
+                
+                % Compute infinite horizon solution
+                for iter = 1:5000
+                    Kinf_prev = Kinf;
+                    Kinf = (R_rho + obj.B' * Pinf * obj.B + 1e-8*eye(obj.nu)) \ (obj.B' * Pinf * obj.A);
+                    Pinf = Q_rho + obj.A' * Pinf * (obj.A - obj.B * Kinf);
+                    
+                    if norm(Kinf - Kinf_prev) < 1e-10
+                        break;
+                    end
+                end
+                
+                AmBKt = (obj.A - obj.B * Kinf)';
+                Quu_inv = inv(R_rho + obj.B' * Pinf * obj.B);
+                
+                % Set cache terms in the solver
+                tinympc_matlab('set_cache_terms', Kinf, Pinf, Quu_inv, AmBKt, false);
+                
+                fprintf('Cache terms computed with norms: Kinf=%.6f, Pinf=%.6f\n', norm(Kinf), norm(Pinf));
+                fprintf('C1=%.6f, C2=%.6f\n', norm(Quu_inv), norm(AmBKt));
+                
+            catch ME
+                error('TinyMPC:ComputeCacheTermsFailed', ...
+                    'Failed to compute cache terms: %s', ME.message);
+            end
+        end
+        
+        function [dK, dP, dC1, dC2] = compute_sensitivity_autograd(obj)
+            % Compute sensitivity matrices dK, dP, dC1, dC2 with respect to rho
+            % This is a simplified version - in practice, you would use automatic differentiation
+            %
+            % Returns:
+            %   dK - Derivative of feedback gain w.r.t. rho (nu x nx)
+            %   dP - Derivative of value function w.r.t. rho (nx x nx)
+            %   dC1 - Derivative of first cache matrix w.r.t. rho (nu x nu)
+            %   dC2 - Derivative of second cache matrix w.r.t. rho (nx x nx)
+            
+            obj.check_setup();
+            
+            try
+                % This is a simplified analytical approximation
+                % In practice, you would use automatic differentiation tools
+                
+                % Get current rho value
+                rho = 1.0; % Default rho value
+                
+                % Compute base solution
+                [Kinf, Pinf, Quu_inv, AmBKt] = obj.compute_cache_terms();
+                
+                % Compute finite difference approximation
+                delta_rho = 1e-6;
+                
+                % Perturb rho and recompute
+                Q_rho_pert = obj.Q + (rho + delta_rho) * eye(obj.nx);
+                R_rho_pert = obj.R + (rho + delta_rho) * eye(obj.nu);
+                
+                % Compute perturbed solution
+                Kinf_pert = zeros(obj.nu, obj.nx);
+                Pinf_pert = obj.Q;
+                
+                for iter = 1:5000
+                    Kinf_prev = Kinf_pert;
+                    Kinf_pert = (R_rho_pert + obj.B' * Pinf_pert * obj.B + 1e-8*eye(obj.nu)) \ (obj.B' * Pinf_pert * obj.A);
+                    Pinf_pert = Q_rho_pert + obj.A' * Pinf_pert * (obj.A - obj.B * Kinf_pert);
+                    
+                    if norm(Kinf_pert - Kinf_prev) < 1e-10
+                        break;
+                    end
+                end
+                
+                AmBKt_pert = (obj.A - obj.B * Kinf_pert)';
+                Quu_inv_pert = inv(R_rho_pert + obj.B' * Pinf_pert * obj.B);
+                
+                % Compute derivatives via finite differences
+                dK = (Kinf_pert - Kinf) / delta_rho;
+                dP = (Pinf_pert - Pinf) / delta_rho;
+                dC1 = (Quu_inv_pert - Quu_inv) / delta_rho;
+                dC2 = (AmBKt_pert - AmBKt) / delta_rho;
+                
+                fprintf('Sensitivity matrices computed via finite differences\n');
+                
+            catch ME
+                error('TinyMPC:ComputeSensitivityAutoGradFailed', ...
+                    'Failed to compute sensitivity matrices: %s', ME.message);
+            end
+        end
+
         function reset(obj)
             % Reset the solver (cleanup current setup)
             
@@ -576,6 +789,39 @@ classdef TinyMPC < handle
                      '  - %d x %d matrix (full trajectory)\n' ...
                      'Got %d x %d'], ...
                     name, dim, dim, dim, horizon, size(ref, 1), size(ref, 2));
+            end
+        end
+        
+        function validate_sensitivity_matrices(obj, dK, dP, dC1, dC2)
+            % Validate sensitivity matrices dimensions
+            if size(dK, 1) ~= obj.nu || size(dK, 2) ~= obj.nx
+                error('TinyMPC:InvalidDimensions', ...
+                    'dK must be nu x nx = %d x %d, got %d x %d', ...
+                    obj.nu, obj.nx, size(dK, 1), size(dK, 2));
+            end
+            
+            if size(dP, 1) ~= obj.nx || size(dP, 2) ~= obj.nx
+                error('TinyMPC:InvalidDimensions', ...
+                    'dP must be nx x nx = %d x %d, got %d x %d', ...
+                    obj.nx, obj.nx, size(dP, 1), size(dP, 2));
+            end
+            
+            if size(dC1, 1) ~= obj.nu || size(dC1, 2) ~= obj.nu
+                error('TinyMPC:InvalidDimensions', ...
+                    'dC1 must be nu x nu = %d x %d, got %d x %d', ...
+                    obj.nu, obj.nu, size(dC1, 1), size(dC1, 2));
+            end
+            
+            if size(dC2, 1) ~= obj.nx || size(dC2, 2) ~= obj.nx
+                error('TinyMPC:InvalidDimensions', ...
+                    'dC2 must be nx x nx = %d x %d, got %d x %d', ...
+                    obj.nx, obj.nx, size(dC2, 1), size(dC2, 2));
+            end
+            
+            % Check that matrices are real-valued
+            if ~isreal(dK) || ~isreal(dP) || ~isreal(dC1) || ~isreal(dC2)
+                error('TinyMPC:InvalidInput', ...
+                    'All sensitivity matrices must be real-valued');
             end
         end
         

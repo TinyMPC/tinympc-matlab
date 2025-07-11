@@ -2,10 +2,12 @@
 clear; close all;
 
 % Add TinyMPC class to path
+
 currentFile = mfilename('fullpath');
 [scriptPath, ~, ~] = fileparts(currentFile);
 repoRoot = fileparts(scriptPath);
 addpath(fullfile(repoRoot, 'src', 'matlab_wrapper'));
+addpath(fullfile(repoRoot, 'build'));
 
 % Cartpole system matrices
 A = [1.0, 0.01, 0.0, 0.0;

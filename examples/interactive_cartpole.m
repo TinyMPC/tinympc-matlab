@@ -3,10 +3,12 @@
 %[text] Restart the kernel if something breaks.
 
 % Add TinyMPC class to path
+
 currentFile = mfilename('fullpath');
 [scriptPath, ~, ~] = fileparts(currentFile);
 repoRoot = fileparts(scriptPath);
 addpath(fullfile(repoRoot, 'src', 'matlab_wrapper'));
+addpath(fullfile(repoRoot, 'build'));
 
 %%
 %[text] Define problem parameters and setup the MPC solver

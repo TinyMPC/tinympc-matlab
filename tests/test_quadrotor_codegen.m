@@ -1,7 +1,10 @@
 % Test code generation for quadrotor
 
 clear; clc;
-addpath(fullfile(fileparts(mfilename('fullpath')), '..', 'src', 'matlab_wrapper'));
+testRoot = fileparts(mfilename('fullpath'));
+repoRoot = fileparts(testRoot);
+addpath(fullfile(repoRoot, 'src', 'matlab_wrapper'));
+addpath(fullfile(repoRoot, 'build'));
 
 Adyn = [...
     1.0000000, 0.0000000, 0.0000000, 0.0000000, 0.0245250, 0.0000000, 0.0500000, 0.0000000, 0.0000000, 0.0000000, 0.0002044, 0.0000000;

@@ -1,6 +1,9 @@
 % Test code generation for cartpole
 clear; clc;
-addpath(fullfile(fileparts(mfilename('fullpath')), '..', 'src', 'matlab_wrapper'));
+testRoot = fileparts(mfilename('fullpath'));
+repoRoot = fileparts(testRoot);
+addpath(fullfile(repoRoot, 'src', 'matlab_wrapper'));
+addpath(fullfile(repoRoot, 'build'));
 
 A = [1.0, 0.01, 0.0, 0.0;
      0.0, 1.0, 0.039, 0.0;

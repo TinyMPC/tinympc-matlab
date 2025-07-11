@@ -487,39 +487,28 @@ classdef TinyMPC < handle
             %   AmBKt - Transpose of (A - B*K) (nx x nx)
             
             obj.check_setup();
-            
             try
                 % Get current rho value
                 current_rho = obj.rho; % Use stored rho value
-                
                 % Add rho regularization
                 Q_rho = obj.Q + current_rho * eye(obj.nx);
                 R_rho = obj.R + current_rho * eye(obj.nu);
-                
                 % Initialize
                 Kinf = zeros(obj.nu, obj.nx);
                 Pinf = obj.Q;
-                
                 % Compute infinite horizon solution
                 for iter = 1:5000
                     Kinf_prev = Kinf;
                     Kinf = (R_rho + obj.B' * Pinf * obj.B + 1e-8*eye(obj.nu)) \ (obj.B' * Pinf * obj.A);
                     Pinf = Q_rho + obj.A' * Pinf * (obj.A - obj.B * Kinf);
-                    
                     if norm(Kinf - Kinf_prev) < 1e-10
                         break;
                     end
                 end
-                
                 AmBKt = (obj.A - obj.B * Kinf)';
                 Quu_inv = inv(R_rho + obj.B' * Pinf * obj.B);
-                
-                % Set cache terms in the solver
-                tinympc_matlab('set_cache_terms', Kinf, Pinf, Quu_inv, AmBKt, false);
-                
                 fprintf('Cache terms computed with norms: Kinf=%.6f, Pinf=%.6f\n', norm(Kinf), norm(Pinf));
                 fprintf('C1=%.6f, C2=%.6f\n', norm(Quu_inv), norm(AmBKt));
-                
             catch ME
                 error('TinyMPC:ComputeCacheTermsFailed', ...
                     'Failed to compute cache terms: %s', ME.message);

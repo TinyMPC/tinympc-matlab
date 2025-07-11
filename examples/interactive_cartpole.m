@@ -30,12 +30,19 @@ Q = diag([10, 1, 10, 1]);  % State cost matrix
 R = diag([1]);            % Control cost matrix
 
 % Create TinyMPC solver
-prob = TinyMPC(n, m, N, A, B, Q, R);
+prob = TinyMPC();
 
 % Set constraint bounds
 u_min = -5;  % Force constraint (min)
 u_max = 5;   % Force constraint (max)
-prob.setup('u_min', u_min, 'u_max', u_max, 'rho', 0.1);
+
+prob.setup(A, B, Q, R, N, 'u_min', u_min, 'u_max', u_max, 'rho', 0.1);
+
+% Set reference trajectory (origin stabilization)
+Xref = zeros(n, N);        % nx x N  
+Uref = zeros(m, N-1);      % nu x (N-1)
+prob.set_x_ref(Xref);
+prob.set_u_ref(Uref);
 
 %%
 %[text] Generate tailored C code for this specific problem.
@@ -55,14 +62,13 @@ x0 = [0.0; 0; 0.1; 0];  % Initial state (small angle perturbation)
 % Run MPC loop
 for k = 1:Nsim
     % 1. Set current state measurement
-    prob.set_initial_state(x0);
+    prob.set_x0(x0);
     
     % 2. Solve MPC problem
-    prob.solve();
+    solution = prob.solve();
     
     % 3. Get control input
-    [x_traj, u_traj] = prob.get_solution();
-    u = u_traj(:,1);  % Apply first control input
+    u = solution.controls;  % Apply first control input
     
     % 4. Simulate system dynamics
     x1 = A * x0 + B * u;

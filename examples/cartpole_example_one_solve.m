@@ -17,15 +17,16 @@ Q = diag([10.0, 1, 10, 1]);
 R = diag([1.0]);
 N = 20;
 
-% Create and setup solver
-prob = TinyMPC(size(A,1), size(B,2), N, A, B, Q, R);
-prob.setup('rho', 1.0);
+% Create solver (empty constructor - Python style)
+solver = TinyMPC();
+
+% Setup solver with matrices (Python-compatible interface)
+solver.setup(A, B, Q, R, N, 'rho', 1.0);
 
 % Set initial condition and solve
 x0 = [0.5; 0; 0; 0];
-prob.set_initial_state(x0);
-prob.solve();
+solver.set_x0(x0);
+solution = solver.solve();
 
 % Get and display solution
-[~, u_traj] = prob.get_solution();
-disp(u_traj);
+disp(solution.controls_all);

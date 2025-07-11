@@ -17,15 +17,15 @@ Q = diag([10.0, 1, 10, 1]);
 R = diag([1.0]);
 N = 20;
 
-% Create and setup solver 
-prob = TinyMPC(size(A,1), size(B,2), N, A, B, Q, R);
-
-% Set constraint bounds
+% Constraint bounds
 u_min = -0.5;
 u_max = 0.5;
 
-% Setup solver
-prob.setup('u_min', u_min, 'u_max', u_max, 'rho', 1.0, 'verbose', true);
+% Create solver (empty constructor - Python style)
+solver = TinyMPC();
+
+% Setup solver with matrices and constraints (Python-compatible interface)
+solver.setup(A, B, Q, R, N, 'u_min', u_min, 'u_max', u_max, 'rho', 1.0, 'verbose', true);
 
 % Generate code
-prob.codegen('out');
+solver.codegen('out');

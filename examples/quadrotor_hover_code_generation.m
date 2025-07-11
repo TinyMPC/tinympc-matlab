@@ -1,3 +1,4 @@
+
 % Concise Quadrotor Hover Code Generation Example (MATLAB) - matches Python version
 clear; close all;
 
@@ -8,7 +9,7 @@ repoRoot = fileparts(scriptPath);
 addpath(fullfile(repoRoot, 'src', 'matlab_wrapper'));
 
 % Toggle switch for adaptive rho
-ENABLE_ADAPTIVE_RHO = false;   % Set to true to enable adaptive rho
+ENABLE_ADAPTIVE_RHO = true;   % Set to true to enable adaptive rho
 
 % Quadrotor system matrices (12 states, 4 inputs)
 rho_value = 5.0;
@@ -48,8 +49,39 @@ R = diag(R_diag);
 N = 20;
 
 % Create and setup solver
-prob = TinyMPC(size(Adyn,1), size(Bdyn,2), N, Adyn, Bdyn, Q, R);
-prob.setup('rho', rho_value, 'verbose', true);
+prob = TinyMPC();
 
-% Generate code
-prob.codegen('out');
+prob.setup(Adyn, Bdyn, Q, R, N, 'rho', rho_value, 'verbose', true, 'adaptive_rho', ENABLE_ADAPTIVE_RHO);
+
+% Set reference trajectory (hover at origin)
+Xref = zeros(size(Adyn,1), N);        % nx x N
+Uref = zeros(size(Bdyn,2), N-1);      % nu x (N-1)
+prob.set_x_ref(Xref);
+prob.set_u_ref(Uref);
+
+if ENABLE_ADAPTIVE_RHO
+    % Compute cache terms
+    [Kinf, Pinf, Quu_inv, AmBKt] = prob.compute_cache_terms();
+    % Compute sensitivity matrices (finite difference)
+    [dK, dP, dC1, dC2] = prob.compute_sensitivity_autograd();
+    % Print norms for inspection
+    fprintf('MATLAB: Sensitivity matrix norms: dK=%.6e, dP=%.6e, dC1=%.6e, dC2=%.6e\n', norm(dK), norm(dP), norm(dC1), norm(dC2));
+    
+    % Print actual matrices for visual comparison
+    fprintf('\n=== MATLAB SENSITIVITY MATRICES ===\n');
+    fprintf('dK (gain derivative) [%dx%d]:\n', size(dK,1), size(dK,2));
+    disp(dK);
+    fprintf('\ndP (value function derivative) [%dx%d]:\n', size(dP,1), size(dP,2));
+    disp(dP);
+    fprintf('\ndC1 (Quu_inv derivative) [%dx%d]:\n', size(dC1,1), size(dC1,2));
+    disp(dC1);
+    fprintf('\ndC2 (AmBKt derivative) [%dx%d]:\n', size(dC2,1), size(dC2,2));
+    disp(dC2);
+    fprintf('=== END MATLAB MATRICES ===\n\n');
+    
+    % Generate code with sensitivity
+    prob.codegen_with_sensitivity('out', dK, dP, dC1, dC2);
+else
+    % Generate code without sensitivity
+    prob.codegen('out');
+end

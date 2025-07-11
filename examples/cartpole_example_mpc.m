@@ -17,9 +17,11 @@ Q = diag([10.0, 1, 10, 1]);
 R = diag([1.0]);
 N = 20;
 
-% Create and setup solver (Python-like interface)
-prob = TinyMPC(size(A,1), size(B,2), N, A, B, Q, R);
-prob.setup('rho', 1.0, 'verbose', false);
+% Create solver (empty constructor - Python style)
+solver = TinyMPC();
+
+% Setup solver with matrices (Python-compatible interface)
+solver.setup(A, B, Q, R, N, 'rho', 1.0, 'verbose', false);
 
 % Set initial condition
 x0 = [0.5; 0; 0; 0];
@@ -30,10 +32,9 @@ xs = zeros(Nsim-N, 4);
 us = zeros(Nsim-N, 1);
 
 for i = 1:(Nsim-N)
-    prob.set_initial_state(x0);
-    prob.solve();
-    [~, u_traj] = prob.get_solution();
-    u = u_traj(:,1);
+    solver.set_x0(x0);
+    solution = solver.solve();
+    u = solution.controls;
     x0 = A * x0 + B * u;
     xs(i,:) = x0';
     us(i) = u;

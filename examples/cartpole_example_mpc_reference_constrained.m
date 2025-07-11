@@ -17,17 +17,19 @@ Q = diag([10.0, 1, 10, 1]);
 R = diag([1.0]);
 N = 20;
 
-% Create and setup solver with input constraints
-prob = TinyMPC(size(A,1), size(B,2), N, A, B, Q, R);
-
-% Set constraint bounds and setup solver
+% Constraint bounds
 u_min = -0.45;
 u_max = 0.45;
-prob.setup('u_min', u_min, 'u_max', u_max);
+
+% Create solver (empty constructor - Python style)
+solver = TinyMPC();
+
+% Setup solver with matrices and constraints (Python-compatible interface)
+solver.setup(A, B, Q, R, N, 'u_min', u_min, 'u_max', u_max);
 
 % Set reference trajectory (goal must be another equilibrium position)
 x_ref = repmat([1.0; 0; 0; 0], 1, N);  % 4x20 matrix
-prob.set_state_reference(x_ref);
+solver.set_x_ref(x_ref);
 
 % Set initial condition
 x0 = [0.5; 0; 0; 0];
@@ -38,10 +40,9 @@ xs = zeros(Nsim-N, 4);
 us = zeros(Nsim-N, 1);
 
 for i = 1:(Nsim-N)
-    prob.set_initial_state(x0);
-    prob.solve();
-    [~, u_traj] = prob.get_solution();
-    u = u_traj(:,1);
+    solver.set_x0(x0);
+    solution = solver.solve();
+    u = solution.controls;
     x0 = A * x0 + B * u;
     xs(i,:) = x0';
     us(i) = u;

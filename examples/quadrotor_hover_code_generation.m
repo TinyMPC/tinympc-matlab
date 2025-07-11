@@ -9,7 +9,7 @@ repoRoot = fileparts(scriptPath);
 addpath(fullfile(repoRoot, 'src', 'matlab_wrapper'));
 
 % Toggle switch for adaptive rho
-ENABLE_ADAPTIVE_RHO = true;   % Set to true to enable adaptive rho
+ENABLE_ADAPTIVE_RHO = false;   % Set to true to enable adaptive rho
 
 % Quadrotor system matrices (12 states, 4 inputs)
 rho_value = 5.0;

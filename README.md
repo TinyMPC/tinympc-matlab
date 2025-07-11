@@ -2,10 +2,12 @@
 
 MATLAB wrapper for [TinyMPC](https://tinympc.org/). Supports code generation and interaction with the C/C++ backend. Tested on Ubuntu and macOS.
 
+
 ## Prerequisites
 
 - MATLAB (tested with R2024b and later)
 - C++ compiler with C++17 support
+- **Symbolic Math Toolbox** (required for sensitivity computation and adaptive rho workflows)
 
 ### macOS
 - Xcode or Command Line Tools
@@ -41,29 +43,48 @@ The `examples/` directory contains scripts demonstrating TinyMPC features:
 - `quadrotor_hover_code_generation.m` - Quadrotor codegen
 - `test_adaptive_rho_functionality.m` - Adaptive rho and sensitivity test
 
-## Features
-
-- Basic MPC setup and solve
-- Code generation
-- Adaptive rho (automatic penalty adaptation)
-- Sensitivity matrix support
-- Cache term computation
-- Constraint and reference setting
-
 ## Usage Example
 
+### Standard Workflow (No Sensitivity)
+
 ```matlab
-solver = TinyMPC(nx, nu, N, A, B, Q, R);
-solver.setup('adaptive_rho', true, ...
-            'adaptive_rho_min', 0.1, ...
-            'adaptive_rho_max', 10.0, ...
-            'adaptive_rho_enable_clipping', true, ...
-            'verbose', true);
-[Kinf, Pinf, Quu_inv, AmBKt] = solver.compute_cache_terms();
-[dK, dP, dC1, dC2] = solver.compute_sensitivity_autograd();
-solver.set_sensitivity_matrices(dK, dP, dC1, dC2);
-solver.codegen_with_sensitivity('./output_dir', dK, dP, dC1, dC2);
+prob = TinyMPC();
+prob.setup(A, B, Q, R, N, 'rho', 5.0, 'verbose', true);
+prob.set_x_ref(Xref);  % Set state reference trajectory
+prob.set_u_ref(Uref);  % Set input reference trajectory
+prob.codegen('output_dir');
 ```
+
+### Adaptive Rho / Sensitivity Workflow
+
+**Requires Symbolic Math Toolbox**
+
+```matlab
+prob = TinyMPC();
+prob.setup(A, B, Q, R, N, 'rho', 5.0, 'verbose', true, 'adaptive_rho', true);
+prob.set_x_ref(Xref);
+prob.set_u_ref(Uref);
+
+% Compute cache terms (LQR solution)
+[Kinf, Pinf, Quu_inv, AmBKt] = prob.compute_cache_terms();
+
+% Compute exact sensitivity matrices using Symbolic Math Toolbox
+[dK, dP, dC1, dC2] = prob.compute_sensitivity_autograd();
+
+% Set sensitivity matrices for codegen
+prob.set_sensitivity_matrices(dK, dP, dC1, dC2);
+
+% Generate code with sensitivity
+prob.codegen_with_sensitivity('output_dir', dK, dP, dC1, dC2);
+```
+
+See `examples/quadrotor_hover_code_generation.m` for a complete example.
+## Notes on Symbolic Math Toolbox
+
+- The method `compute_sensitivity_autograd()` uses symbolic differentiation to compute exact derivatives of the LQR solution with respect to `rho`.
+- This is required for adaptive rho workflows and for generating code with sensitivity matrices.
+- For large systems, symbolic computation may be slow. For typical MPC problems (e.g., cartpole, quadrotor), it is practical and robust.
+
 
 ## Class Methods
 
@@ -105,25 +126,3 @@ When you compile, the following files are generated:
 ## Documentation
 
 See [https://tinympc.org/](https://tinympc.org/) for full documentation.
-
-## Troubleshooting
-
-### macOS
-1. **"Supported compiler not detected":**
-   - Make sure Xcode is installed and its license is accepted: `sudo xcodebuild -license accept`
-   - Or install Command Line Tools: `xcode-select --install`
-   - Configure MATLAB's MEX compiler: `mex -setup C++`
-2. **"Xcode license not accepted":**
-   - Run `sudo xcodebuild -license accept`
-   - Or open Xcode and accept the license through the GUI
-3. **Eigen not found:**
-   - The library includes a bundled Eigen
-   - Or install: `brew install eigen`
-
-### Linux
-1. **Missing compiler:**
-   - Install GCC: `sudo apt-get install build-essential`
-   - Install MEX dependencies: `sudo apt-get install libc6-dev`
-2. **Eigen not found:**
-   - The library includes a bundled Eigen
-   - Or install: `sudo apt-get install libeigen3-dev`

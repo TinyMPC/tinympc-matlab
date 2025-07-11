@@ -528,57 +528,51 @@ classdef TinyMPC < handle
         
         function [dK, dP, dC1, dC2] = compute_sensitivity_autograd(obj)
             % Compute sensitivity matrices dK, dP, dC1, dC2 with respect to rho
-            % This is a simplified version - in practice, you would use automatic differentiation
+            % Uses Symbolic Math Toolbox for exact derivatives
             %
             % Returns:
             %   dK - Derivative of feedback gain w.r.t. rho (nu x nx)
             %   dP - Derivative of value function w.r.t. rho (nx x nx)
             %   dC1 - Derivative of first cache matrix w.r.t. rho (nu x nu)
             %   dC2 - Derivative of second cache matrix w.r.t. rho (nx x nx)
-            
+
             obj.check_setup();
-            
+
             try
-                % This is a simplified analytical approximation
-                % In practice, you would use automatic differentiation tools
-                
-                % Get current rho value
-                current_rho = obj.rho; % Use stored rho value
-                
-                % Compute base solution
-                [Kinf, Pinf, Quu_inv, AmBKt] = obj.compute_cache_terms();
-                
-                % Compute finite difference approximation
-                delta_rho = 1e-6;
-                
-                % Perturb rho and recompute
-                Q_rho_pert = obj.Q + (current_rho + delta_rho) * eye(obj.nx);
-                R_rho_pert = obj.R + (current_rho + delta_rho) * eye(obj.nu);
-                
-                % Compute perturbed solution
-                Kinf_pert = zeros(obj.nu, obj.nx);
-                Pinf_pert = obj.Q;
-                
-                for iter = 1:5000
-                    Kinf_prev = Kinf_pert;
-                    Kinf_pert = (R_rho_pert + obj.B' * Pinf_pert * obj.B + 1e-8*eye(obj.nu)) \ (obj.B' * Pinf_pert * obj.A);
-                    Pinf_pert = Q_rho_pert + obj.A' * Pinf_pert * (obj.A - obj.B * Kinf_pert);
-                    
-                    if norm(Kinf_pert - Kinf_prev) < 1e-10
+                % Use symbolic differentiation for exact derivatives
+                current_rho = obj.rho;
+                syms rho_sym real
+                Q_rho = obj.Q + rho_sym * eye(obj.nx);
+                R_rho = obj.R + rho_sym * eye(obj.nu);
+
+                % Symbolic LQR solution (discrete-time, infinite horizon)
+                % Iterative solution for symbolic Pinf and Kinf
+                Pinf = Q_rho;
+                for iter = 1:1000
+                    Kinf = simplify((R_rho + obj.B' * Pinf * obj.B + 1e-8*eye(obj.nu)) \ (obj.B' * Pinf * obj.A));
+                    Pinf_next = simplify(Q_rho + obj.A' * Pinf * (obj.A - obj.B * Kinf));
+                    if isequaln(Pinf_next, Pinf)
                         break;
                     end
+                    Pinf = Pinf_next;
                 end
-                
-                AmBKt_pert = (obj.A - obj.B * Kinf_pert)';
-                Quu_inv_pert = inv(R_rho_pert + obj.B' * Pinf_pert * obj.B);
-                
-                % Compute derivatives via finite differences
-                dK = (Kinf_pert - Kinf) / delta_rho;
-                dP = (Pinf_pert - Pinf) / delta_rho;
-                dC1 = (Quu_inv_pert - Quu_inv) / delta_rho;
-                dC2 = (AmBKt_pert - AmBKt) / delta_rho;
-                
-                fprintf('Sensitivity matrices computed via finite differences\n');
+
+                AmBKt = (obj.A - obj.B * Kinf)';
+                Quu_inv = inv(R_rho + obj.B' * Pinf * obj.B);
+
+                % Compute derivatives symbolically
+                dK_sym = simplify( diff(Kinf, rho_sym) );
+                dP_sym = simplify( diff(Pinf, rho_sym) );
+                dC1_sym = simplify( diff(Quu_inv, rho_sym) );
+                dC2_sym = simplify( diff(AmBKt, rho_sym) );
+
+                % Substitute current rho value and convert to double
+                dK = double(subs(dK_sym, rho_sym, current_rho));
+                dP = double(subs(dP_sym, rho_sym, current_rho));
+                dC1 = double(subs(dC1_sym, rho_sym, current_rho));
+                dC2 = double(subs(dC2_sym, rho_sym, current_rho));
+
+                fprintf('Sensitivity matrices computed via Symbolic Math Toolbox\n');
                 
             catch ME
                 error('TinyMPC:ComputeSensitivityAutoGradFailed', ...

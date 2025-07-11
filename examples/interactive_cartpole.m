@@ -1,17 +1,23 @@
 %[text] # Interactive TinyMPC Example in MATLAB
 %[text] We demonstrate an interactive workflow in MATLAB with TinyMPC where you can generate C code and interact with it via MATLAB. This example uses a cartpole linearized model.
 %[text] Restart the kernel if something breaks.
-%[text] **PLEASE CHANGE** **tinympc\_matlab\_dir** **TO YOUR ABSOLUTE PATH**
-tinympc_matlab_dir = '/home/moises/Documents/A2R/forks/tinympc-matlab/'; % Your absolute path to the tinympc-matlab directory
-addpath(genpath(tinympc_matlab_dir));
-%%
-%[text] Define problem parameters and setup the MPC solver.
-% Problem data includes cartpole LTI model, cost weights, constraints and settings
-n = 4; % state dimension: x, xdot, theta, thetadot
-m = 1; % force dimension: F
-N = 10; % horizon
 
-% Cartpole dynamics (same as other examples)
+% Add TinyMPC class to path
+currentFile = mfilename('fullpath');
+[scriptPath, ~, ~] = fileparts(currentFile);
+repoRoot = fileparts(scriptPath);
+addpath(fullfile(repoRoot, 'src', 'matlab_wrapper'));
+
+%%
+%[text] Define problem parameters and setup the MPC solver
+% Problem data includes cartpole LTI model, cost weights, constraints and settings
+
+% System dimensions
+n = 4;  % state dimension: x, xdot, theta, thetadot
+m = 1;  % force dimension: F
+N = 10; % horizon length
+
+% Cartpole dynamics (linearized model)
 A = [1.0, 0.01, 0.0, 0.0;
      0.0, 1.0, 0.039, 0.0;
      0.0, 0.0, 1.002, 0.01;
@@ -19,121 +25,104 @@ A = [1.0, 0.01, 0.0, 0.0;
 
 B = [0.0; 0.02; 0.0; 0.067];
 
-Q = diag([10, 1, 10, 1]);  % Q matrix
-R = diag([1]); % R matrix
-rho = 0.1; % ADMM penalty parameter
+% Cost matrices
+Q = diag([10, 1, 10, 1]);  % State cost matrix
+R = diag([1]);            % Control cost matrix
 
-% Affine dynamics term (zeros for linear system)
-fdyn = zeros(n, 1);
+% Create TinyMPC solver
+prob = TinyMPC(n, m, N, A, B, Q, R);
 
-% Constraints
-infty = 1e17;
-x_min = -infty * ones(n, N); % state constraints
-x_max = infty * ones(n, N); % state constraints
-u_min = -5 * ones(m, N-1); % force constraints
-u_max = 5 * ones(m, N-1);% force constraints
+% Set constraint bounds
+u_min = -5;  % Force constraint (min)
+u_max = 5;   % Force constraint (max)
+prob.setup('u_min', u_min, 'u_max', u_max, 'rho', 0.1);
 
-verbose = 0; % Set to 1 for debug output
-
-% Setup solver
-status = tinympc_matlab('setup', A, B, fdyn, Q, R, rho, n, m, N, x_min, x_max, u_min, u_max, verbose);
-
-if status ~= 0
-    error('Setup failed with status %d', status);
-end
 %%
 %[text] Generate tailored C code for this specific problem.
-output_dir = fullfile(tinympc_matlab_dir,'generated_code'); % Path to the generated code
-codegen_status = tinympc_matlab('codegen', output_dir, verbose);
+%[text] You can generate standalone C code that can be deployed to embedded systems.
 
-if codegen_status == 0 %[output:group:893530bd]
-    fprintf('✅ Code generation completed successfully!\n'); %[output:442ec1df]
-else
-    fprintf('❌ Code generation failed with status %d\n', codegen_status);
-end %[output:group:893530bd]
+% Generate code to the 'out' directory
+prob.codegen('out');
+
 %%
-%[text] Run the interactive MPC example using the TinyMPC solver.
-Nsim = 300;
-x_all = {}; % List of all stored states
-x0 = [0.0; 0; 0.1; 0]; % Initial state
+%[text] Run the interactive MPC example using our TinyMPC class interface.
+%[text] This demonstrates closing the control loop with simulated sensor measurements.
 
-% Set reference trajectories (zeros - regulation problem)
-x_ref = zeros(n, N);
-u_ref = zeros(m, N-1);
-tinympc_matlab('set_x_ref', x_ref, verbose);
-tinympc_matlab('set_u_ref', u_ref, verbose);
+Nsim = 300;  % Number of simulation steps
+x_all = {};  % List to store all states
+x0 = [0.0; 0; 0.1; 0];  % Initial state (small angle perturbation)
 
-for k = 1:Nsim %[output:group:562dcdfc]
+% Run MPC loop
+for k = 1:Nsim
+    % 1. Set current state measurement
+    prob.set_initial_state(x0);
     
-    % 1. Set initial state from measurement    
-    tinympc_matlab('set_x0', x0, verbose); % Set initial state
+    % 2. Solve MPC problem
+    prob.solve();
     
-    % 2. Set the reference state if needed (already set above)
+    % 3. Get control input
+    [x_traj, u_traj] = prob.get_solution();
+    u = u_traj(:,1);  % Apply first control input
     
-    % 3. Solve the problem
-    solve_status = tinympc_matlab('solve', verbose); % Solve the MPC problem %[output:83fb8b72]
+    % 4. Simulate system dynamics
+    x1 = A * x0 + B * u;
     
-    % 4. Get the control input
-    [x_sol, u_sol] = tinympc_matlab('get_solution', verbose); % Get the solution
-    u_current = u_sol(:, 1);
-    
-    % 5. Simulate the dynamics    
-    x1 = A * x0 + B * u_current;
-
-    % Add some noise to simulate measurement uncertainty
+    % 5. Add measurement noise
     noise = 0.01 * randn(n, 1);
     x0 = x1 + noise;
     
+    % Store state for visualization
     x_all{end + 1} = x1';
-end %[output:group:562dcdfc]
-
-% Clean up
-tinympc_matlab('reset', verbose);
-%%
-%[text] Cartpole visualization
-% Initialize cartpole visualization
-figure; %[output:397212a1]
-xlim([-2.5, 2.5]); %[output:397212a1]
-ylim([-1, 1]); %[output:397212a1]
-cart = plot(NaN, NaN, 'bo', 'MarkerSize', 20); %[output:397212a1]
-hold on; %[output:397212a1]
-pole = plot(NaN, NaN, 'r-', 'LineWidth', 4); %[output:397212a1]
-
-init(cart,pole); %[output:397212a1]
-xlim([-2.5, 2.5]); %[output:397212a1]
-ylim([-1, 1]); %[output:397212a1]
-for frame = 1:Nsim %[output:group:1c94a799]
-    update(frame,x_all,cart,pole); %[output:397212a1]
-    pause(0.01);
-    F(frame) = getframe(gcf);
-end %[output:group:1c94a799]
-%%
-%[text] Save the animation
-v = VideoWriter('cartpole_animation.avi');
-open(v);
-writeVideo(v, F);
-close(v);
-%%
-%[text] 
-function init(cart,pole)
-    set(cart, 'XData', []);
-    set(cart, 'YData', []);
-    set(pole, 'XData', []);
-    set(pole, 'YData', []);
 end
 
-function update(frame,x_all,cart,pole)
+% Clean up (optional - happens automatically when object is destroyed)
+% prob.reset();
+%%
+%[text] # Cartpole Visualization
+%[text] Create an animated visualization of the cartpole system. The blue dot represents the cart, and the red line represents the pole.
+
+% Initialize visualization
+figure;
+xlim([-2.5, 2.5]);
+ylim([-1, 1]);
+cart = plot(NaN, NaN, 'bo', 'MarkerSize', 20);
+hold on;
+pole = plot(NaN, NaN, 'r-', 'LineWidth', 4);
+
+% Initialize animation objects
+set(cart, 'XData', []);
+set(cart, 'YData', []);
+set(pole, 'XData', []);
+set(pole, 'YData', []);
+xlim([-2.5, 2.5]);
+ylim([-1, 1]);
+
+% Run animation
+for frame = 1:Nsim
     x = x_all{frame};
     
     % Update cart position
     set(cart, 'XData', x(1), 'YData', 0);
     
-    % Update pole position
-    set(pole, 'XData', [x(1), x(1) - 0.5 * sin(x(3))], 'YData', [0, 0.5 * cos(x(3))]);
+    % Update pole position (length = 0.5)
+    set(pole, 'XData', [x(1), x(1) - 0.5 * sin(x(3))], ...
+             'YData', [0, 0.5 * cos(x(3))]);
     
     drawnow;
+    pause(0.01);
+    F(frame) = getframe(gcf);
 end
-%[text] After testing MPC procedure with the generated code, you can deploy it to your applications/systems. Stay tuned for Teensy and STM32 deployment tutorials.
+
+%%
+%[text] # Save the Animation
+%[text] Save the animation as an AVI file that can be shared or embedded in presentations.
+
+v = VideoWriter('cartpole_animation.avi');
+open(v);
+writeVideo(v, F);
+close(v);
+
+%[text] After testing the MPC procedure with the generated code, you can deploy it to your applications/systems. The code generation feature creates efficient C code that can be deployed to embedded systems like Teensy or STM32 microcontrollers.
 
 %[appendix]{"version":"1.0"}
 %---

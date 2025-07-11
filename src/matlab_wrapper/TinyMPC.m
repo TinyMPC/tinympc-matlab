@@ -1,8 +1,6 @@
 classdef TinyMPC < handle
     properties (Access = private)
-        solver_ptr = []; % Pointer to the C++ solver
         is_setup = false; % Flag to track if solver is setup
-        lib_name = 'tinympc_matlab'; % Default library name
     end
     
     properties (Access = public)
@@ -11,134 +9,155 @@ classdef TinyMPC < handle
         nu = 0; % Input dimension
         N = 0; % Prediction horizon
         
-        % Problem matrices
-        A = []; % State transition matrix
-        B = []; % Input matrix
-        f = []; % Affine term (optional, defaults to zeros)
-        Q = []; % State cost matrix
-        R = []; % Input cost matrix
-        
-        % Constraint bounds (optional)
-        x_min = []; % State lower bounds (nx x N)
-        x_max = []; % State upper bounds (nx x N)
-        u_min = []; % Input lower bounds (nu x N-1)
-        u_max = []; % Input upper bounds (nu x N-1)
-        
-        % Solver parameters
-        rho = 1.0; % ADMM penalty parameter
-        verbose = true; % Verbose output flag
+        % Problem matrices (required)
+        A = []; % State transition matrix (nx x nx)
+        B = []; % Input matrix (nx x nu)
+        Q = []; % State cost matrix (nx x nx)
+        R = []; % Input cost matrix (nu x nu)
     end
     
     methods
-        function obj = TinyMPC(nx, nu, N, A, B, Q, R, varargin)
+        function obj = TinyMPC(nx, nu, N, A, B, Q, R)
             % Constructor for TinyMPC class
             % 
             % Usage:
             %   solver = TinyMPC(nx, nu, N, A, B, Q, R)
-            %   solver = TinyMPC(nx, nu, N, A, B, Q, R, 'rho', 2.0, 'verbose', true)
             %
             % Required arguments:
-            %   nx - State dimension
-            %   nu - Input dimension  
-            %   N - Prediction horizon
+            %   nx - State dimension (positive integer)
+            %   nu - Input dimension (positive integer)
+            %   N - Prediction horizon (positive integer >= 2)
             %   A - State transition matrix (nx x nx)
             %   B - Input matrix (nx x nu)
-            %   Q - State cost matrix (nx x nx)
-            %   R - Input cost matrix (nu x nu)
+            %   Q - State cost matrix (nx x nx, positive semidefinite)
+            %   R - Input cost matrix (nu x nu, positive definite)
             %
-            % Optional arguments (name-value pairs):
-            %   'f' - Affine term (nx x 1), defaults to zeros
-            %   'rho' - ADMM penalty parameter, defaults to 1.0
-            %   'verbose' - Verbose output flag, defaults to true
-            %   'lib_name' - Library name, defaults to 'tinympc_matlab'
+            % Notes:
+            %   - All matrices should be real-valued
+            %   - Use setup() method to configure constraints and solver options
+            %   - Call setup() before using solve()
             
             if nargin < 7
-                error('TinyMPC requires at least 7 arguments: nx, nu, N, A, B, Q, R');
+                error('TinyMPC:InvalidInput', ...
+                    'TinyMPC requires exactly 7 arguments: nx, nu, N, A, B, Q, R');
             end
             
-            % Parse optional arguments
-            p = inputParser;
-            addParameter(p, 'f', zeros(nx, 1), @(x) isnumeric(x) && size(x,1) == nx && size(x,2) == 1);
-            addParameter(p, 'rho', 1.0, @(x) isnumeric(x) && x > 0);
-            addParameter(p, 'verbose', true, @islogical);
-            addParameter(p, 'lib_name', 'tinympc_matlab', @ischar);
-            parse(p, varargin{:});
+            % Validate dimensions
+            if ~(isnumeric(nx) && isscalar(nx) && nx > 0 && nx == round(nx))
+                error('TinyMPC:InvalidInput', 'nx must be a positive integer, got %s', class(nx));
+            end
+            if ~(isnumeric(nu) && isscalar(nu) && nu > 0 && nu == round(nu))
+                error('TinyMPC:InvalidInput', 'nu must be a positive integer, got %s', class(nu));
+            end
+            if ~(isnumeric(N) && isscalar(N) && N >= 2 && N == round(N))
+                error('TinyMPC:InvalidInput', 'N must be an integer >= 2, got %g', N);
+            end
             
             % Store problem dimensions
             obj.nx = nx;
             obj.nu = nu;
             obj.N = N;
             
-            % Store problem matrices
+            % Store and validate problem matrices
             obj.A = A;
             obj.B = B;
-            obj.f = p.Results.f;
             obj.Q = Q;
             obj.R = R;
             
-            % Store parameters
-            obj.rho = p.Results.rho;
-            obj.verbose = p.Results.verbose;
-            obj.lib_name = p.Results.lib_name;
-            
-            % Validate dimensions
-            obj.validate_dimensions();
-            
-            if obj.verbose
-                fprintf('TinyMPC initialized with dimensions: nx=%d, nu=%d, N=%d\n', nx, nu, N);
-            end
+            % Validate matrix dimensions and properties
+            obj.validate_matrices();
         end
         
-        function success = setup(obj)
-            % Setup the TinyMPC solver with problem data
+        function success = setup(obj, varargin)
+            % Setup the TinyMPC solver with optional constraints and parameters
+            %
+            % Usage:
+            %   prob.setup()  % Default settings
+            %   prob.setup('rho', 1.5, 'verbose', true)
+            %   prob.setup('u_min', -2, 'u_max', 2, 'rho', 1.0)
+            %   prob.setup('x_min', x_min_array, 'x_max', x_max_array, ...)
+            %
+            % Optional name-value pair arguments:
+            %   'f' - Affine dynamics term (nx x 1), defaults to zeros(nx,1)
+            %   'rho' - ADMM penalty parameter (positive scalar), defaults to 1.0
+            %   'verbose' - Verbose output flag (logical), defaults to false
+            %   'max_iter' - Maximum iterations (positive integer), defaults to 100
+            %   
+            %   State constraints (applied to all time steps):
+            %   'x_min' - State lower bounds (scalar, nx x 1, or nx x N)
+            %   'x_max' - State upper bounds (scalar, nx x 1, or nx x N)
+            %   
+            %   Input constraints (applied to all time steps):  
+            %   'u_min' - Input lower bounds (scalar, nu x 1, or nu x (N-1))
+            %   'u_max' - Input upper bounds (scalar, nu x 1, or nu x (N-1))
             %
             % Returns:
             %   success - true if setup was successful, false otherwise
+            %
+            % Example:
+            %   prob = TinyMPC(4, 1, 20, A, B, Q, R);
+            %   prob.setup('u_min', -5, 'u_max', 5, 'rho', 1.5, 'verbose', true);
             
             if obj.is_setup
-                warning('Solver already setup. Call reset() first to re-setup.');
+                warning('TinyMPC:AlreadySetup', ...
+                    'Solver already setup. Call reset() first to re-setup.');
                 success = false;
                 return;
             end
             
             try
-                % Ensure library is loaded
-                obj.ensure_library_loaded();
+                % Parse optional arguments with comprehensive validation
+                p = inputParser;
+                addParameter(p, 'f', zeros(obj.nx, 1), @(x) obj.validate_affine_term(x));
+                addParameter(p, 'rho', 1.0, @(x) obj.validate_scalar_positive(x, 'rho'));
+                addParameter(p, 'verbose', false, @(x) obj.validate_logical(x, 'verbose'));
+                addParameter(p, 'max_iter', 100, @(x) obj.validate_scalar_positive_integer(x, 'max_iter'));
                 
-                % Flatten matrices for C interface (column-major order)
-                A_flat = obj.A(:);
-                B_flat = obj.B(:);
-                f_flat = obj.f(:);
-                Q_flat = obj.Q(:);
-                R_flat = obj.R(:);
+                % Constraint parameters
+                addParameter(p, 'x_min', [], @(x) obj.validate_bounds(x, obj.nx, obj.N, 'x_min'));
+                addParameter(p, 'x_max', [], @(x) obj.validate_bounds(x, obj.nx, obj.N, 'x_max'));
+                addParameter(p, 'u_min', [], @(x) obj.validate_bounds(x, obj.nu, obj.N-1, 'u_min'));
+                addParameter(p, 'u_max', [], @(x) obj.validate_bounds(x, obj.nu, obj.N-1, 'u_max'));
                 
-                % Create solver pointer placeholder
-                solver_ptr_ptr = libpointer('voidPtrPtr');
+                parse(p, varargin{:});
                 
-                % Call C setup function
-                status = calllib(obj.lib_name, 'tiny_setup_matlab', ...
-                    solver_ptr_ptr, A_flat, B_flat, f_flat, Q_flat, R_flat, ...
-                    obj.rho, obj.nx, obj.nu, obj.N, obj.verbose);
+                % Extract validated parameters
+                f = p.Results.f;
+                rho = p.Results.rho;
+                verbose = p.Results.verbose;
+                
+                % Process constraint bounds with intelligent defaults
+                x_min = obj.process_bounds(p.Results.x_min, obj.nx, obj.N, -1e17, 'x_min');
+                x_max = obj.process_bounds(p.Results.x_max, obj.nx, obj.N, +1e17, 'x_max');
+                u_min = obj.process_bounds(p.Results.u_min, obj.nu, obj.N-1, -1e17, 'u_min');
+                u_max = obj.process_bounds(p.Results.u_max, obj.nu, obj.N-1, +1e17, 'u_max');
+                
+                % Call MEX setup function
+                status = tinympc_matlab('setup', obj.A, obj.B, f, obj.Q, obj.R, ...
+                    rho, obj.nx, obj.nu, obj.N, x_min, x_max, u_min, u_max, verbose);
                 
                 if status == 0
-                    obj.solver_ptr = solver_ptr_ptr.Value;
                     obj.is_setup = true;
                     success = true;
                     
-                    if obj.verbose
-                        fprintf('TinyMPC solver setup successful\n');
+                    if verbose
+                        fprintf('TinyMPC solver setup successful (nx=%d, nu=%d, N=%d)\n', ...
+                            obj.nx, obj.nu, obj.N);
                     end
                 else
                     success = false;
-                    error('TinyMPC solver setup failed with status: %d', status);
+                    error('TinyMPC:SetupFailed', ...
+                        'TinyMPC solver setup failed with status: %d', status);
                 end
                 
             catch ME
                 success = false;
-                if obj.verbose
-                    fprintf('Error in setup: %s\n', ME.message);
+                if contains(ME.identifier, 'TinyMPC:')
+                    rethrow(ME);  % Re-throw our custom errors as-is
+                else
+                    error('TinyMPC:SetupError', ...
+                        'Error during solver setup: %s', ME.message);
                 end
-                rethrow(ME);
             end
         end
         
@@ -146,63 +165,95 @@ classdef TinyMPC < handle
             % Set the initial state for the MPC problem
             %
             % Arguments:
-            %   x0 - Initial state vector (nx x 1)
+            %   x0 - Initial state vector (nx x 1 or 1 x nx)
             %
             % Returns:
             %   success - true if successful, false otherwise
             
             obj.check_setup();
             
-            if length(x0) ~= obj.nx
-                error('Initial state x0 must have length nx = %d', obj.nx);
-            end
+            % Validate and reshape input
+            x0 = obj.validate_and_reshape_vector(x0, obj.nx, 'initial state x0');
             
             try
-                calllib(obj.lib_name, 'set_x0', x0(:), obj.verbose);
+                tinympc_matlab('set_x0', x0, false);  % Use false for verbose internally
                 success = true;
             catch ME
                 success = false;
-                if obj.verbose
-                    fprintf('Error setting initial state: %s\n', ME.message);
-                end
-                rethrow(ME);
+                error('TinyMPC:SetInitialStateFailed', ...
+                    'Failed to set initial state: %s', ME.message);
             end
         end
         
-        function success = set_reference_trajectory(obj, x_ref, u_ref)
-            % Set reference trajectories for state and input
+        function success = set_state_reference(obj, x_ref)
+            % Set state reference trajectory (flexible input handling)
             %
             % Arguments:
-            %   x_ref - State reference trajectory (nx x N)
-            %   u_ref - Input reference trajectory (nu x N-1)
+            %   x_ref - State reference, can be:
+            %           - Single reference state (nx x 1 or 1 x nx) - expanded to full horizon
+            %           - Full trajectory (nx x N) - used as-is
+            %           - Scalar (expanded to constant reference for all states and time)
             %
             % Returns:
             %   success - true if successful, false otherwise
+            %
+            % Examples:
+            %   prob.set_state_reference([1; 0; 0; 0]);        % Single reference state
+            %   prob.set_state_reference(ref_trajectory);      % Full nx x N trajectory  
+            %   prob.set_state_reference(0);                   % Zero reference for all
             
             obj.check_setup();
             
             try
-                if ~isempty(x_ref)
-                    if size(x_ref, 1) ~= obj.nx || size(x_ref, 2) ~= obj.N
-                        error('x_ref must be nx x N = %d x %d', obj.nx, obj.N);
-                    end
-                    calllib(obj.lib_name, 'set_x_ref', x_ref(:), obj.verbose);
-                end
+                % Process and validate reference trajectory
+                x_ref_processed = obj.process_reference(x_ref, obj.nx, obj.N, 'state reference');
                 
-                if ~isempty(u_ref)
-                    if size(u_ref, 1) ~= obj.nu || size(u_ref, 2) ~= (obj.N-1)
-                        error('u_ref must be nu x (N-1) = %d x %d', obj.nu, obj.N-1);
-                    end
-                    calllib(obj.lib_name, 'set_u_ref', u_ref(:), obj.verbose);
-                end
-                
+                tinympc_matlab('set_x_ref', x_ref_processed, false);
                 success = true;
             catch ME
                 success = false;
-                if obj.verbose
-                    fprintf('Error setting reference trajectory: %s\n', ME.message);
+                if contains(ME.identifier, 'TinyMPC:')
+                    rethrow(ME);
+                else
+                    error('TinyMPC:SetStateReferenceFailed', ...
+                        'Failed to set state reference: %s', ME.message);
                 end
-                rethrow(ME);
+            end
+        end
+        
+        function success = set_input_reference(obj, u_ref)
+            % Set input reference trajectory (flexible input handling)
+            %
+            % Arguments:
+            %   u_ref - Input reference, can be:
+            %           - Single reference input (nu x 1 or 1 x nu) - expanded to full horizon
+            %           - Full trajectory (nu x (N-1)) - used as-is
+            %           - Scalar (expanded to constant reference for all inputs and time)
+            %
+            % Returns:
+            %   success - true if successful, false otherwise
+            %
+            % Examples:
+            %   prob.set_input_reference(0);                   % Zero reference for all
+            %   prob.set_input_reference([1; 2]);              % Single reference input
+            %   prob.set_input_reference(ref_trajectory);      % Full nu x (N-1) trajectory
+            
+            obj.check_setup();
+            
+            try
+                % Process and validate reference trajectory
+                u_ref_processed = obj.process_reference(u_ref, obj.nu, obj.N-1, 'input reference');
+                
+                tinympc_matlab('set_u_ref', u_ref_processed, false);
+                success = true;
+            catch ME
+                success = false;
+                if contains(ME.identifier, 'TinyMPC:')
+                    rethrow(ME);
+                else
+                    error('TinyMPC:SetInputReferenceFailed', ...
+                        'Failed to set input reference: %s', ME.message);
+                end
             end
         end
         
@@ -222,35 +273,33 @@ classdef TinyMPC < handle
             
             % Validate dimensions
             if size(x_min, 1) ~= obj.nx || size(x_min, 2) ~= obj.N
-                error('x_min must be nx x N = %d x %d', obj.nx, obj.N);
+                error('TinyMPC:InvalidDimensions', ...
+                    'x_min must be nx x N = %d x %d, got %d x %d', ...
+                    obj.nx, obj.N, size(x_min, 1), size(x_min, 2));
             end
             if size(x_max, 1) ~= obj.nx || size(x_max, 2) ~= obj.N
-                error('x_max must be nx x N = %d x %d', obj.nx, obj.N);
+                error('TinyMPC:InvalidDimensions', ...
+                    'x_max must be nx x N = %d x %d, got %d x %d', ...
+                    obj.nx, obj.N, size(x_max, 1), size(x_max, 2));
             end
             if size(u_min, 1) ~= obj.nu || size(u_min, 2) ~= (obj.N-1)
-                error('u_min must be nu x (N-1) = %d x %d', obj.nu, obj.N-1);
+                error('TinyMPC:InvalidDimensions', ...
+                    'u_min must be nu x (N-1) = %d x %d, got %d x %d', ...
+                    obj.nu, obj.N-1, size(u_min, 1), size(u_min, 2));
             end
             if size(u_max, 1) ~= obj.nu || size(u_max, 2) ~= (obj.N-1)
-                error('u_max must be nu x (N-1) = %d x %d', obj.nu, obj.N-1);
+                error('TinyMPC:InvalidDimensions', ...
+                    'u_max must be nu x (N-1) = %d x %d, got %d x %d', ...
+                    obj.nu, obj.N-1, size(u_max, 1), size(u_max, 2));
             end
             
             try
-                calllib(obj.lib_name, 'set_bound_constraints', ...
-                    x_min(:), x_max(:), u_min(:), u_max(:), obj.verbose);
-                
-                % Store bounds for reference
-                obj.x_min = x_min;
-                obj.x_max = x_max;
-                obj.u_min = u_min;
-                obj.u_max = u_max;
-                
+                tinympc_matlab('set_bounds', x_min(:), x_max(:), u_min(:), u_max(:), false);
                 success = true;
             catch ME
                 success = false;
-                if obj.verbose
-                    fprintf('Error setting bounds: %s\n', ME.message);
-                end
-                rethrow(ME);
+                error('TinyMPC:SetBoundsFailed', ...
+                    'Failed to set bounds: %s', ME.message);
             end
         end
         
@@ -263,14 +312,12 @@ classdef TinyMPC < handle
             obj.check_setup();
             
             try
-                calllib(obj.lib_name, 'call_tiny_solve', obj.verbose);
+                tinympc_matlab('solve', false);
                 success = true;
             catch ME
                 success = false;
-                if obj.verbose
-                    fprintf('Error solving: %s\n', ME.message);
-                end
-                rethrow(ME);
+                error('TinyMPC:SolveFailed', ...
+                    'Failed to solve MPC problem: %s', ME.message);
             end
         end
         
@@ -284,61 +331,12 @@ classdef TinyMPC < handle
             obj.check_setup();
             
             try
-                % Get state trajectory
-                x_soln = zeros(obj.nx * obj.N, 1);
-                calllib(obj.lib_name, 'get_x', x_soln, obj.verbose);
-                x_traj = reshape(x_soln, obj.nx, obj.N);
-                
-                % Get input trajectory
-                u_soln = zeros(obj.nu * (obj.N-1), 1);
-                calllib(obj.lib_name, 'get_u', u_soln, obj.verbose);
-                u_traj = reshape(u_soln, obj.nu, obj.N-1);
+                % Get solution from MEX function
+                [x_traj, u_traj] = tinympc_matlab('get_solution', false);
                 
             catch ME
-                if obj.verbose
-                    fprintf('Error getting solution: %s\n', ME.message);
-                end
-                rethrow(ME);
-            end
-        end
-        
-        function [status, iterations] = get_solver_info(obj)
-            % Get solver status and iteration count
-            %
-            % Returns:
-            %   status - Solver status (0 = solved, 1 = unsolved, -1 = error)
-            %   iterations - Number of iterations used
-            
-            obj.check_setup();
-            
-            try
-                status = calllib(obj.lib_name, 'get_solver_status', obj.verbose);
-                iterations = calllib(obj.lib_name, 'get_solver_iterations', obj.verbose);
-            catch ME
-                if obj.verbose
-                    fprintf('Error getting solver info: %s\n', ME.message);
-                end
-                rethrow(ME);
-            end
-        end
-        
-        function success = reset_dual_variables(obj)
-            % Reset ADMM dual variables to zero
-            %
-            % Returns:
-            %   success - true if successful, false otherwise
-            
-            obj.check_setup();
-            
-            try
-                calllib(obj.lib_name, 'reset_dual_variables', obj.verbose);
-                success = true;
-            catch ME
-                success = false;
-                if obj.verbose
-                    fprintf('Error resetting dual variables: %s\n', ME.message);
-                end
-                rethrow(ME);
+                error('TinyMPC:GetSolutionFailed', ...
+                    'Failed to get solution: %s', ME.message);
             end
         end
         
@@ -354,52 +352,17 @@ classdef TinyMPC < handle
             obj.check_setup();
             
             try
-                status = calllib(obj.lib_name, 'tiny_codegen_matlab', ...
-                    obj.solver_ptr, output_dir, obj.verbose);
+                status = tinympc_matlab('codegen', output_dir, false);
                 success = (status == 0);
                 
-                if success && obj.verbose
+                if success
                     fprintf('Code generation completed successfully in: %s\n', output_dir);
                 end
                 
             catch ME
                 success = false;
-                if obj.verbose
-                    fprintf('Error in code generation: %s\n', ME.message);
-                end
-                rethrow(ME);
-            end
-        end
-        
-        function success = load_library(obj, lib_path, header_path)
-            % Load the TinyMPC MATLAB library
-            %
-            % Arguments:
-            %   lib_path - Path to the compiled library (.dll, .so, or .dylib)
-            %   header_path - Path to the header file for library interface
-            %
-            % Returns:
-            %   success - true if successful, false otherwise
-            
-            try
-                if libisloaded(obj.lib_name)
-                    unloadlibrary(obj.lib_name);
-                end
-                
-                loadlibrary(lib_path, header_path, 'alias', obj.lib_name);
-                success = true;
-                
-                if obj.verbose
-                    fprintf('Library %s loaded successfully\n', obj.lib_name);
-                    % libfunctions(obj.lib_name, '-full'); % Uncomment to see available functions
-                end
-                
-            catch ME
-                success = false;
-                if obj.verbose
-                    fprintf('Error loading library: %s\n', ME.message);
-                end
-                rethrow(ME);
+                error('TinyMPC:CodegenFailed', ...
+                    'Code generation failed: %s', ME.message);
             end
         end
         
@@ -407,14 +370,14 @@ classdef TinyMPC < handle
             % Reset the solver (cleanup current setup)
             
             if obj.is_setup
-                % Note: In a full implementation, we'd call a cleanup function here
-                % For now, just reset the flag
-                obj.solver_ptr = [];
+                try
+                    tinympc_matlab('reset', false);
+                catch
+                    % Ignore errors during reset
+                end
                 obj.is_setup = false;
                 
-                if obj.verbose
-                    fprintf('TinyMPC solver reset\n');
-                end
+                fprintf('TinyMPC solver reset\n');
             end
         end
         
@@ -425,42 +388,202 @@ classdef TinyMPC < handle
     end
     
     methods (Access = private)
-        function validate_dimensions(obj)
-            % Validate that all matrices have correct dimensions
+        function validate_matrices(obj)
+            % Validate that all matrices have correct dimensions and properties
             
+            % Check dimensions
             if size(obj.A, 1) ~= obj.nx || size(obj.A, 2) ~= obj.nx
-                error('Matrix A must be nx x nx = %d x %d', obj.nx, obj.nx);
+                error('TinyMPC:InvalidDimensions', ...
+                    'Matrix A must be nx x nx = %d x %d, got %d x %d', ...
+                    obj.nx, obj.nx, size(obj.A, 1), size(obj.A, 2));
             end
             
             if size(obj.B, 1) ~= obj.nx || size(obj.B, 2) ~= obj.nu
-                error('Matrix B must be nx x nu = %d x %d', obj.nx, obj.nu);
+                error('TinyMPC:InvalidDimensions', ...
+                    'Matrix B must be nx x nu = %d x %d, got %d x %d', ...
+                    obj.nx, obj.nu, size(obj.B, 1), size(obj.B, 2));
             end
             
             if size(obj.Q, 1) ~= obj.nx || size(obj.Q, 2) ~= obj.nx
-                error('Matrix Q must be nx x nx = %d x %d', obj.nx, obj.nx);
+                error('TinyMPC:InvalidDimensions', ...
+                    'Matrix Q must be nx x nx = %d x %d, got %d x %d', ...
+                    obj.nx, obj.nx, size(obj.Q, 1), size(obj.Q, 2));
             end
             
             if size(obj.R, 1) ~= obj.nu || size(obj.R, 2) ~= obj.nu
-                error('Matrix R must be nu x nu = %d x %d', obj.nu, obj.nu);
+                error('TinyMPC:InvalidDimensions', ...
+                    'Matrix R must be nu x nu = %d x %d, got %d x %d', ...
+                    obj.nu, obj.nu, size(obj.R, 1), size(obj.R, 2));
             end
             
-            if size(obj.f, 1) ~= obj.nx || size(obj.f, 2) ~= 1
-                error('Vector f must be nx x 1 = %d x 1', obj.nx);
+            % Check that matrices are real-valued
+            if ~isreal(obj.A) || ~isreal(obj.B) || ~isreal(obj.Q) || ~isreal(obj.R)
+                error('TinyMPC:InvalidInput', ...
+                    'All matrices must be real-valued');
+            end
+            
+            % Check that Q is positive semidefinite
+            if ~issymmetric(obj.Q) || min(eig(obj.Q)) < -1e-10
+                error('TinyMPC:InvalidInput', ...
+                    'Matrix Q must be positive semidefinite');
+            end
+            
+            % Check that R is positive definite
+            if ~issymmetric(obj.R) || min(eig(obj.R)) <= 1e-10
+                error('TinyMPC:InvalidInput', ...
+                    'Matrix R must be positive definite');
+            end
+        end
+        
+        function validate_affine_term(obj, f)
+            % Validate affine dynamics term
+            if ~isempty(f)
+                if ~isnumeric(f) || ~isreal(f)
+                    error('TinyMPC:InvalidInput', ...
+                        'Affine term f must be a real numeric vector');
+                end
+                
+                if ~isequal(size(f), [obj.nx, 1]) && ~isequal(size(f), [1, obj.nx])
+                    error('TinyMPC:InvalidDimensions', ...
+                        'Affine term f must be nx x 1 = %d x 1 or 1 x %d, got %d x %d', ...
+                        obj.nx, obj.nx, size(f, 1), size(f, 2));
+                end
+            end
+        end
+        
+        function validate_scalar_positive(~, value, name)
+            % Validate positive scalar parameter
+            if ~isnumeric(value) || ~isscalar(value) || ~isreal(value) || value <= 0
+                error('TinyMPC:InvalidInput', ...
+                    'Parameter %s must be a positive real scalar, got %s', ...
+                    name, mat2str(value));
+            end
+        end
+        
+        function validate_logical(~, value, name)
+            % Validate logical parameter
+            if ~islogical(value) && ~(isnumeric(value) && isscalar(value) && (value == 0 || value == 1))
+                error('TinyMPC:InvalidInput', ...
+                    'Parameter %s must be logical (true/false), got %s', ...
+                    name, mat2str(value));
+            end
+        end
+        
+        function validate_scalar_positive_integer(~, value, name)
+            % Validate positive integer parameter
+            if ~isnumeric(value) || ~isscalar(value) || ~isreal(value) || value <= 0 || value ~= round(value)
+                error('TinyMPC:InvalidInput', ...
+                    'Parameter %s must be a positive integer, got %s', ...
+                    name, mat2str(value));
+            end
+        end
+        
+        function validate_bounds(~, bounds, dim, horizon, name)
+            % Validate constraint bounds
+            if isempty(bounds)
+                return; % Empty bounds are valid (will use default)
+            end
+            
+            if ~isnumeric(bounds) || ~isreal(bounds)
+                error('TinyMPC:InvalidInput', ...
+                    'Bounds %s must be real numeric, got %s', name, class(bounds));
+            end
+            
+            % Allow scalar, single column, or full matrix
+            if isscalar(bounds)
+                % Scalar is valid - will be expanded
+            elseif isequal(size(bounds), [dim, 1])
+                % Single column is valid - will be expanded
+            elseif isequal(size(bounds), [1, dim])
+                % Single row is valid - will be expanded
+            elseif isequal(size(bounds), [dim, horizon])
+                % Full matrix is valid
+            else
+                error('TinyMPC:InvalidDimensions', ...
+                    ['Bounds %s must be:\n' ...
+                     '  - Scalar (expanded to all elements)\n' ...
+                     '  - %d x 1 vector (expanded to all time steps)\n' ...
+                     '  - 1 x %d vector (expanded to all time steps)\n' ...
+                     '  - %d x %d matrix (full trajectory)\n' ...
+                     'Got %d x %d'], ...
+                    name, dim, dim, dim, horizon, size(bounds, 1), size(bounds, 2));
+            end
+        end
+        
+        function bounds_out = process_bounds(~, bounds, dim, horizon, default_val, name)
+            % Process and expand bounds to full matrix
+            if isempty(bounds)
+                bounds_out = default_val * ones(dim, horizon);
+            elseif isscalar(bounds)
+                bounds_out = bounds * ones(dim, horizon);
+            elseif isequal(size(bounds), [dim, 1])
+                bounds_out = repmat(bounds, 1, horizon);
+            elseif isequal(size(bounds), [1, dim])
+                bounds_out = repmat(bounds', 1, horizon);
+            elseif isequal(size(bounds), [dim, horizon])
+                bounds_out = bounds;
+            else
+                error('TinyMPC:InvalidDimensions', ...
+                    'Invalid bounds size for %s', name);
+            end
+        end
+        
+        function vec_out = validate_and_reshape_vector(~, vec, expected_length, name)
+            % Validate and reshape vector to column vector
+            if ~isnumeric(vec) || ~isreal(vec)
+                error('TinyMPC:InvalidInput', ...
+                    '%s must be a real numeric vector, got %s', name, class(vec));
+            end
+            
+            if isscalar(vec)
+                vec_out = vec * ones(expected_length, 1);
+            elseif isequal(size(vec), [expected_length, 1])
+                vec_out = vec;
+            elseif isequal(size(vec), [1, expected_length])
+                vec_out = vec';
+            else
+                error('TinyMPC:InvalidDimensions', ...
+                    '%s must be %d x 1, 1 x %d, or scalar, got %d x %d', ...
+                    name, expected_length, expected_length, size(vec, 1), size(vec, 2));
+            end
+        end
+        
+        function ref_out = process_reference(~, ref, dim, horizon, name)
+            % Process and validate reference trajectory
+            if ~isnumeric(ref) || ~isreal(ref)
+                error('TinyMPC:InvalidInput', ...
+                    '%s must be real numeric, got %s', name, class(ref));
+            end
+            
+            if isscalar(ref)
+                % Scalar reference - expand to full trajectory
+                ref_out = ref * ones(dim, horizon);
+            elseif isequal(size(ref), [dim, 1])
+                % Single reference vector - expand to full trajectory
+                ref_out = repmat(ref, 1, horizon);
+            elseif isequal(size(ref), [1, dim])
+                % Single reference row vector - expand to full trajectory
+                ref_out = repmat(ref', 1, horizon);
+            elseif isequal(size(ref), [dim, horizon])
+                % Full trajectory - use as-is
+                ref_out = ref;
+            else
+                error('TinyMPC:InvalidDimensions', ...
+                    ['%s must be:\n' ...
+                     '  - Scalar (expanded to constant reference)\n' ...
+                     '  - %d x 1 vector (expanded to all time steps)\n' ...
+                     '  - 1 x %d vector (expanded to all time steps)\n' ...
+                     '  - %d x %d matrix (full trajectory)\n' ...
+                     'Got %d x %d'], ...
+                    name, dim, dim, dim, horizon, size(ref, 1), size(ref, 2));
             end
         end
         
         function check_setup(obj)
             % Check if solver is setup, throw error if not
             if ~obj.is_setup
-                error('Solver not setup. Call setup() first.');
-            end
-        end
-        
-        function ensure_library_loaded(obj)
-            % Ensure the library is loaded
-            if ~libisloaded(obj.lib_name)
-                error(['Library %s not loaded. Call load_library() first with the path to ' ...
-                       'your compiled TinyMPC MATLAB library.'], obj.lib_name);
+                error('TinyMPC:NotSetup', ...
+                    'Solver not setup. Call setup() first before using solve(), set_initial_state(), or set_*_reference() methods.');
             end
         end
     end

@@ -1,12 +1,13 @@
 function compile_tinympc_matlab()
     % COMPILE_TINYMPC_MATLAB - Helper script to compile TinyMPC MATLAB interface
     % Based on the working tinympc-python structure
+    % This script should be run from the examples directory.
     
     fprintf('=== TinyMPC MATLAB Compilation ===\n\n');
     
     % Get current directory and paths
     current_dir = pwd;
-    if endsWith(current_dir, 'tests')
+    if endsWith(current_dir, 'examples')
         repo_root = fileparts(current_dir);
     else
         repo_root = current_dir;
@@ -125,14 +126,8 @@ function compile_tinympc_matlab()
         if exist(output_file, 'file')
             fprintf('✓ Created: %s\n', output_file);
             
-            % Copy to examples folder
-            examples_dir = fullfile(repo_root, 'examples');
-            if exist(examples_dir, 'dir')
-                copyfile(output_file, examples_dir);
-                fprintf('✓ Copied MEX file to examples directory\n');
-            else
-                fprintf('⚠ Examples directory not found, MEX file not copied\n');
-            end
+            % Copy to examples folder (already here)
+            fprintf('✓ MEX file is in the examples directory\n');
         else
             fprintf('⚠ Output file not found\n');
         end
@@ -140,7 +135,7 @@ function compile_tinympc_matlab()
     catch ME
         fprintf('✗ Compilation failed: %s\n', ME.message);
         
-        % Print detailed error information
+        % Print detailed error information:
         fprintf('\nDetailed error analysis:\n');
         fprintf('Error identifier: %s\n', ME.identifier);
         fprintf('Error message: %s\n', ME.message);
@@ -166,7 +161,6 @@ end
 function compile_tinympc_static(~)
     % Compile TinyMPC as a static library (following Python's approach)
     fprintf('Building TinyMPC static library...\n');
-    
     % This is simplified - in a full implementation, you'd use CMake
     % For now, we'll compile the sources directly with the MEX command
     fprintf('  Note: TinyMPC sources will be compiled directly with the wrapper\n');
@@ -175,37 +169,29 @@ end
 function has_eigen = check_eigen_system()
     % Check if Eigen is available system-wide or bundled
     eigen_paths = get_eigen_include_paths();
-    
-    % Check if any of the Eigen paths exist
     has_eigen = false;
     for i = 1:length(eigen_paths)
         eigen_path = eigen_paths{i};
-        % Check for bundled Eigen structure first
-        % Looking for include/Eigen/Eigen/Dense (path ends in Eigen)
         if endsWith(eigen_path, 'Eigen') && exist(fullfile(eigen_path, 'Eigen', 'Dense'), 'file') == 2
             has_eigen = true;
             fprintf('  ✓ Bundled Eigen found at: %s\n', eigen_path);
             break;
-        % Check for bundled Eigen structure (base include path)
         elseif exist(fullfile(eigen_path, 'Eigen', 'Eigen', 'Dense'), 'file') == 2
             has_eigen = true;
             fprintf('  ✓ Bundled Eigen found at: %s\n', eigen_path);
             break;
-        % Check for system Eigen structure (include/Eigen/Dense)
         elseif exist(fullfile(eigen_path, 'Eigen', 'Dense'), 'file') == 2
             has_eigen = true;
             fprintf('  ✓ System Eigen found at: %s\n', eigen_path);
             break;
         end
     end
-    
     if ~has_eigen
         fprintf('  ✗ Eigen not found in any standard location\n');
     end
 end
 
 function install_eigen_system()
-    % Install Eigen using the appropriate package manager
     if is_macos()
         fprintf('Installing Eigen via Homebrew...\n');
         [status, ~] = system('brew install eigen');
@@ -222,69 +208,52 @@ function install_eigen_system()
 end
 
 function paths = get_eigen_include_paths()
-    % Get Eigen include paths for different platforms
-    % Priority: bundled Eigen > system Eigen
-    
-    % Get current directory and paths
     current_dir = pwd;
-    if endsWith(current_dir, 'tests')
+    if endsWith(current_dir, 'examples')
         repo_root = fileparts(current_dir);
     else
         repo_root = current_dir;
     end
-    
     tinympc_dir = fullfile(repo_root, 'src', 'tinympc', 'TinyMPC');
-    
-    % Start with bundled Eigen (highest priority)
-    % The bundled Eigen structure is: include/Eigen/Eigen/Dense
-    % We need to include include/Eigen so that #include <Eigen/Dense> works
     paths = {
-        fullfile(tinympc_dir, 'include', 'Eigen');    % Bundled Eigen (include/Eigen/Eigen/*)
-        fullfile(tinympc_dir, 'include');             % Bundled Eigen base path
+        fullfile(tinympc_dir, 'include', 'Eigen');
+        fullfile(tinympc_dir, 'include');
     };
-    
-    % Add system Eigen paths as fallback
     if is_macos()
-        % macOS Homebrew paths
         system_paths = {
-            '/opt/homebrew/include/eigen3';          % Apple Silicon Homebrew
-            '/opt/homebrew/include/eigen3/Eigen';    % Apple Silicon Homebrew (compatibility)
-            '/usr/local/include/eigen3';             % Intel Homebrew
-            '/usr/local/include/eigen3/Eigen';       % Intel Homebrew (compatibility)
-            '/opt/local/include/eigen3';             % MacPorts
-            '/opt/local/include/eigen3/Eigen';       % MacPorts (compatibility)
+            '/opt/homebrew/include/eigen3';
+            '/opt/homebrew/include/eigen3/Eigen';
+            '/usr/local/include/eigen3';
+            '/usr/local/include/eigen3/Eigen';
+            '/opt/local/include/eigen3';
+            '/opt/local/include/eigen3/Eigen';
         };
     else
-        % Linux paths
         system_paths = {
-            '/usr/include/eigen3';                   % For Eigen
-            '/usr/include/eigen3/Eigen';             % For Eigen headers (compatibility)
-            '/usr/local/include/eigen3';             % Local install
-            '/usr/local/include/eigen3/Eigen';       % Local install (compatibility)
+            '/usr/include/eigen3';
+            '/usr/include/eigen3/Eigen';
+            '/usr/local/include/eigen3';
+            '/usr/local/include/eigen3/Eigen';
         };
     end
-    
-    % Add system paths
     paths = [paths; system_paths];
 end
 
 function is_mac = is_macos()
-    % Check if running on macOS
     is_mac = ismac();
 end
 
 function ext = get_mex_extension()
-    % Get the appropriate MEX extension for the current platform
     if ismac()
         if contains(computer('arch'), 'arm64')
-            ext = 'mexmaca64';  % Apple Silicon
+            ext = 'mexmaca64';
         else
-            ext = 'mexmaci64';  % Intel Mac
+            ext = 'mexmaci64';
         end
     elseif isunix()
-        ext = 'mexa64';         % Linux
+        ext = 'mexa64';
     elseif ispc()
-        ext = 'mexw64';         % Windows
+        ext = 'mexw64';
     else
         error('Unsupported platform');
     end

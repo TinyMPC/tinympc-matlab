@@ -4,6 +4,7 @@ generated_code*/
 generated_quadrotor_code/
 *.tmp
 examples/out/
+tests/out/
 
 # Windows default autosave extension
 *.asv

@@ -54,15 +54,15 @@ end
 
 % Generate code
 fprintf('Generating C code...\n');
-codegen_status = tinympc_matlab('codegen', 'out', verbose);
+codegen_status = tinympc_matlab('codegen', 'generated_code', verbose);
 
 if codegen_status == 0
     fprintf('✅ Code generation completed successfully!\n');
-    fprintf('Generated files in "out" directory:\n');
+    fprintf('Generated files in "generated_code" directory:\n');
     
     % List generated files if directory exists
-    if exist('out', 'dir')
-        files = dir('out');
+    if exist('generated_code', 'dir')
+        files = dir('generated_code');
         for i = 1:length(files)
             if ~files(i).isdir
                 fprintf('  - %s\n', files(i).name);

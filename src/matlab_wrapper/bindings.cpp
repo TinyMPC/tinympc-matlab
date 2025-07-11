@@ -3,6 +3,7 @@
 #include <iostream>
 #include <cstring>
 #include <memory>
+#include <filesystem>
 
 // Fix the Eigen include issue by using the standard approach
 #include <Eigen/Dense>
@@ -296,8 +297,86 @@ void codegen(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
         mexPrintf("Starting code generation to: %s\n", output_dir);
     }
     
-    // Generate code
     int status = tiny_codegen(g_solver.get(), output_dir, verbose);
+    
+    if (status != 0) {
+        if (verbose) {
+            mexPrintf("C++ code generation failed with status: %d\n", status);
+        }
+        plhs[0] = mxCreateDoubleScalar(status);
+        mxFree(output_dir);
+        return;
+    }
+    
+    // Copy additional build artifacts (Eigen headers, TinyMPC headers/sources, CMakeLists.txt)
+    std::filesystem::path output_path(output_dir);
+    
+    try {
+        // Get the path to the current MEX file to locate the codegen_src directory
+        std::string mex_path = __FILE__;
+        std::filesystem::path mex_dir = std::filesystem::path(mex_path).parent_path();
+        std::filesystem::path codegen_src_path = mex_dir / "codegen_src";
+        std::filesystem::path wrapper_path = mex_dir / "wrapper";
+        
+        if (verbose) {
+            mexPrintf("Copying additional build artifacts...\n");
+            mexPrintf("MEX directory: %s\n", mex_dir.string().c_str());
+            mexPrintf("Codegen source path: %s\n", codegen_src_path.string().c_str());
+            mexPrintf("Wrapper path: %s\n", wrapper_path.string().c_str());
+        }
+        
+        // Copy codegen_src contents (include/ and tinympc/ directories)
+        if (std::filesystem::exists(codegen_src_path)) {
+            std::filesystem::copy(codegen_src_path, output_path, 
+                std::filesystem::copy_options::recursive | 
+                std::filesystem::copy_options::overwrite_existing);
+            
+            if (verbose) {
+                mexPrintf("Copied codegen_src directory (Eigen headers and TinyMPC sources)\n");
+            }
+        } else {
+            if (verbose) {
+                mexPrintf("Warning: codegen_src directory not found at: %s\n", codegen_src_path.string().c_str());
+            }
+        }
+        
+        // Copy wrapper files (CMakeLists.txt)
+        if (std::filesystem::exists(wrapper_path)) {
+            for (const auto& entry : std::filesystem::directory_iterator(wrapper_path)) {
+                if (entry.is_regular_file()) {
+                    std::filesystem::copy_file(entry.path(), output_path / entry.path().filename(),
+                        std::filesystem::copy_options::overwrite_existing);
+                    
+                    if (verbose) {
+                        mexPrintf("Copied wrapper file: %s\n", entry.path().filename().string().c_str());
+                    }
+                }
+            }
+        } else {
+            if (verbose) {
+                mexPrintf("Warning: wrapper directory not found at: %s\n", wrapper_path.string().c_str());
+            }
+        }
+        
+        // Create empty build directory for convenience
+        std::filesystem::path build_path = output_path / "build";
+        if (!std::filesystem::exists(build_path)) {
+            std::filesystem::create_directory(build_path);
+            if (verbose) {
+                mexPrintf("Created empty build directory\n");
+            }
+        }
+        
+        if (verbose) {
+            mexPrintf("Successfully copied all build artifacts\n");
+        }
+        
+    } catch (const std::filesystem::filesystem_error& e) {
+        if (verbose) {
+            mexPrintf("Error copying build artifacts: %s\n", e.what());
+        }
+        // Continue anyway since basic code generation succeeded
+    }
     
     // Return status
     plhs[0] = mxCreateDoubleScalar(status);

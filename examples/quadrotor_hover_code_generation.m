@@ -89,19 +89,19 @@ fprintf('Generating C code for quadrotor hover...\n');
 if ENABLE_ADAPTIVE_RHO
     fprintf('Note: Adaptive rho sensitivity matrices not implemented in MATLAB wrapper\n');
     fprintf('Generating code without sensitivity matrices...\n');
-    codegen_status = tinympc_matlab('codegen', 'out', verbose);
+    codegen_status = tinympc_matlab('codegen', 'generated_code', verbose);
 else
     fprintf('Generating code without sensitivity matrices...\n');
-    codegen_status = tinympc_matlab('codegen', 'out', verbose);
+    codegen_status = tinympc_matlab('codegen', 'generated_code', verbose);
 end
 
 if codegen_status == 0
     fprintf('✅ Code generation completed successfully!\n');
-    fprintf('Generated files in "out" directory:\n');
+    fprintf('Generated files in "generated_code" directory:\n');
     
     % List generated files if directory exists
-    if exist('out', 'dir')
-        files = dir('out');
+    if exist('generated_code', 'dir')
+        files = dir('generated_code');
         for i = 1:length(files)
             if ~files(i).isdir
                 fprintf('  - %s\n', files(i).name);

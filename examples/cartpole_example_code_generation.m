@@ -1,4 +1,4 @@
-% Concise Cartpole Code Generation Example (MATLAB) - matches Python version
+% Cartpole Code Generation Example (MATLAB)
 clear; close all;
 
 % Add TinyMPC class to path
@@ -21,10 +21,10 @@ N = 20;
 u_min = -0.5;
 u_max = 0.5;
 
-% Create solver (empty constructor - Python style)
+% Create solver
 solver = TinyMPC();
 
-% Setup solver with matrices and constraints (Python-compatible interface)
+% Setup solver with matrices and constraints
 solver.setup(A, B, Q, R, N, 'u_min', u_min, 'u_max', u_max, 'rho', 1.0, 'verbose', true);
 
 % Generate code

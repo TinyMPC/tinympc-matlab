@@ -1,4 +1,4 @@
-% test_settings.m - Test solver setup with custom options (MATLAB)
+% Test solver setup with custom options
 clear; clc;
 addpath(fullfile(fileparts(mfilename('fullpath')), '..', 'src', 'matlab_wrapper'));
 

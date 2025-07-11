@@ -1,4 +1,4 @@
-% Concise Cartpole MPC Reference Constrained Example (MATLAB) - matches Python version
+% Cartpole MPC Reference Constrained Example (MATLAB)
 clear; close all;
 
 % Add TinyMPC class to path
@@ -21,10 +21,10 @@ N = 20;
 u_min = -0.45;
 u_max = 0.45;
 
-% Create solver (empty constructor - Python style)
+% Create solver
 solver = TinyMPC();
 
-% Setup solver with matrices and constraints (Python-compatible interface)
+% Setup solver with matrices and constraints
 solver.setup(A, B, Q, R, N, 'u_min', u_min, 'u_max', u_max);
 
 % Set reference trajectory (goal must be another equilibrium position)

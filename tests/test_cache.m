@@ -1,4 +1,4 @@
-% test_cache.m - Basic setup and cache test for TinyMPC (MATLAB)
+% Basic setup and cache test for TinyMPC
 clear; clc;
 addpath(fullfile(fileparts(mfilename('fullpath')), '..', 'src', 'matlab_wrapper'));
 

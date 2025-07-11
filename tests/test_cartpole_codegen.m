@@ -1,4 +1,4 @@
-% test_cartpole_codegen.m - Test code generation for cartpole (MATLAB)
+% Test code generation for cartpole
 clear; clc;
 addpath(fullfile(fileparts(mfilename('fullpath')), '..', 'src', 'matlab_wrapper'));
 

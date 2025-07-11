@@ -1,4 +1,4 @@
-% Concise Cartpole One Solve Example (MATLAB) - matches Python version
+% Cartpole One Solve Example (MATLAB)
 clear; close all;
 
 % Add TinyMPC class to path
@@ -17,10 +17,10 @@ Q = diag([10.0, 1, 10, 1]);
 R = diag([1.0]);
 N = 20;
 
-% Create solver (empty constructor - Python style)
+% Create solver
 solver = TinyMPC();
 
-% Setup solver with matrices (Python-compatible interface)
+% Setup solver with matrices
 solver.setup(A, B, Q, R, N, 'rho', 1.0);
 
 % Set initial condition and solve
@@ -28,5 +28,5 @@ x0 = [0.5; 0; 0; 0];
 solver.set_x0(x0);
 solution = solver.solve();
 
-% Get and display solution
+% Display solution
 disp(solution.controls_all);

@@ -1,4 +1,4 @@
-% test_quadrotor_codegen.m - Test code generation for quadrotor (MATLAB)
+% Test code generation for quadrotor
 
 clear; clc;
 addpath(fullfile(fileparts(mfilename('fullpath')), '..', 'src', 'matlab_wrapper'));

@@ -2,7 +2,7 @@
 clear; clc;
 testRoot = fileparts(mfilename('fullpath'));
 repoRoot = fileparts(testRoot);
-addpath(fullfile(repoRoot, 'src', 'matlab_wrapper'));
+addpath(fullfile(repoRoot, 'src'));
 addpath(fullfile(repoRoot, 'build'));
 
 A = [1.0, 0.01, 0.0, 0.0;

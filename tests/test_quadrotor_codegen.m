@@ -3,7 +3,7 @@
 clear; clc;
 testRoot = fileparts(mfilename('fullpath'));
 repoRoot = fileparts(testRoot);
-addpath(fullfile(repoRoot, 'src', 'matlab_wrapper'));
+addpath(fullfile(repoRoot, 'src'));
 addpath(fullfile(repoRoot, 'build'));
 
 Adyn = [...

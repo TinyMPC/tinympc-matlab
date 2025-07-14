@@ -6,7 +6,7 @@ clear; close all;
 currentFile = mfilename('fullpath');
 [scriptPath, ~, ~] = fileparts(currentFile);
 repoRoot = fileparts(scriptPath);
-addpath(fullfile(repoRoot, 'src', 'matlab_wrapper'));
+addpath(fullfile(repoRoot, 'src'));
 addpath(fullfile(repoRoot, 'build'));
 
 % Cartpole system matrices

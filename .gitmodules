@@ -1,3 +1,4 @@
-[submodule "tinympc"]
-	path = tinympc
-	url = https://github.com/tinympc/tinympc.git
+[submodule "tinympc/TinyMPC"]
+	path = tinympc/TinyMPC
+	url = https://github.com/TinyMPC/TinyMPC.git
+	branch = main

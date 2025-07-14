@@ -1,3 +1,5 @@
+ Ignore build directory and all contents
+build/
 .DS_Store
 *.avi
 generated_code*/

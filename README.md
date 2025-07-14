@@ -9,28 +9,31 @@ MATLAB wrapper for [TinyMPC](https://tinympc.org/). Supports code generation and
 - C++ compiler with C++17 support
 - **Symbolic Math Toolbox** (required for sensitivity computation and adaptive rho workflows)
 
-### macOS
-- Xcode or Command Line Tools
-- Accept Xcode license: `sudo xcodebuild -license accept`
-- Or install Command Line Tools: `xcode-select --install`
-- Eigen is bundled, but can also be installed via `brew install eigen`
-
-### Ubuntu/Linux
-- GCC with C++17 support
-- Eigen is bundled, but can also be installed via `sudo apt-get install libeigen3-dev`
 
 ## Building
 
-1. Clone this repo:
+1. Clone this repo (with submodules):
    ```bash
-   git clone https://github.com/TinyMPC/tinympc-matlab.git
+   git clone --recurse-submodules https://github.com/TinyMPC/tinympc-matlab.git
    ```
-2. Compile the MATLAB wrapper:
-   ```matlab
-   cd tests
-   compile_tinympc_matlab
+   If you already cloned without `--recurse-submodules`, run:
+   ```bash
+   git submodule update --init --recursive
    ```
-3. Run any example in the `examples/` directory (e.g. `interactive_cartpole.m`)
+
+2. Create a build directory and configure the project with CMake:
+   ```bash
+   mkdir build
+   cd build
+   cmake ..
+   ```
+
+3. Build the MATLAB wrapper and examples:
+   ```bash
+   make
+   ```
+
+4. Run any example in the `examples/` directory (e.g. `interactive_cartpole.m`)
 
 ## Examples
 

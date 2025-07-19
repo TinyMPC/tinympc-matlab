@@ -12,7 +12,7 @@ MATLAB wrapper for [TinyMPC](https://tinympc.org/). Supports code generation and
 
 ## Building
 
-1. Clone this repo (with submodules):
+1. **Clone this repo (with submodules):**
    ```bash
    git clone --recurse-submodules https://github.com/TinyMPC/tinympc-matlab.git
    ```
@@ -21,19 +21,22 @@ MATLAB wrapper for [TinyMPC](https://tinympc.org/). Supports code generation and
    git submodule update --init --recursive
    ```
 
-2. Create a build directory and configure the project with CMake:
+2. **Build the C++ library:**
    ```bash
+   cd tinympc-matlab
    mkdir build
    cd build
    cmake ..
-   ```
-
-3. Build the MATLAB wrapper and examples:
-   ```bash
    make
    ```
 
-4. Run any example in the `examples/` directory (e.g. `interactive_cartpole.m`)
+3. **Verify installation:**
+   ```matlab
+   % Add paths and test that the module loads correctly
+   addpath('src'); addpath('build');
+   solver = TinyMPC();
+   disp('✅ TinyMPC MATLAB ready to use!');
+   ```
 
 ## Examples
 
@@ -44,26 +47,43 @@ The `examples/` directory contains scripts demonstrating TinyMPC features:
 - `cartpole_example_mpc_reference_constrained.m` - Reference tracking and constraints
 - `cartpole_example_code_generation.m` - Code generation
 - `quadrotor_hover_code_generation.m` - Quadrotor codegen
-- `test_adaptive_rho_functionality.m` - Adaptive rho and sensitivity test
 
 ## Usage Example
 
 ### Basic MPC Workflow
 
 ```matlab
+% Add required paths
+addpath('src'); addpath('build');
+
+% System matrices (cartpole example)
+A = [1.0  0.01  0.0   0.0;
+     0.0  1.0   0.039 0.0;
+     0.0  0.0   1.002 0.01;
+     0.0  0.0   0.458 1.002];
+B = [0.0; 0.02; 0.0; 0.067];
+Q = diag([10.0, 1.0, 10.0, 1.0]);
+R = 1.0;
+N = 20;  % Horizon length
+
 % Create and setup solver
 solver = TinyMPC();
 solver.setup(A, B, Q, R, N, 'rho', 1.0, 'verbose', false);
 
-% Set initial state and solve
+% Set initial state and references
 x0 = [0.5; 0; 0; 0];  % Initial state
 solver.set_x0(x0);
-solution = solver.solve();
+solver.set_x_ref(zeros(4, N));      % State reference trajectory
+solver.set_u_ref(zeros(1, N-1));    % Control reference trajectory
+
+% Solve and get solution
+status = solver.solve();  % Returns status code (0 = success)
+solution = solver.get_solution();  % Get actual solution
 
 % Access solution
 fprintf('First control: %.3f\n', solution.controls(1));
-states_trajectory = solution.states_all;     % All predicted states
-controls_trajectory = solution.controls_all; % All predicted controls
+states_trajectory = solution.states;     % All predicted states (4×20)
+controls_trajectory = solution.controls; % All predicted controls (1×19)
 ```
 
 ### Code Generation Workflow
@@ -74,81 +94,83 @@ solver = TinyMPC();
 u_min = -0.5; u_max = 0.5;  % Control bounds
 solver.setup(A, B, Q, R, N, 'u_min', u_min, 'u_max', u_max, 'rho', 1.0);
 
-
 % Generate C++ code
 solver.codegen('out');
 ```
 
-### Sensitivity & Adaptive Rho Workflow
+### Adaptive Rho Workflow
 
 ```matlab
-% Setup solver with adaptive rho enabled
-prob = TinyMPC();
-prob.setup(A, B, Q, R, N, 'rho', 5.0, 'adaptive_rho', true);
+% Setup solver first
+solver = TinyMPC();
+solver.setup(A, B, Q, R, N, 'rho', 1.0, 'adaptive_rho', true);
 
-% Set reference trajectories
-Xref = zeros(nx, N);      % State reference (nx × N)
-Uref = zeros(nu, N-1);    % Input reference (nu × N-1)
-prob.set_x_ref(Xref);
-prob.set_u_ref(Uref);
+% Compute sensitivity matrices using built-in numerical differentiation
+[dK, dP, dC1, dC2] = solver.compute_sensitivity_autograd();
 
-% Compute LQR cache terms
-[Kinf, Pinf, Quu_inv, AmBKt] = prob.compute_cache_terms();
-
-% Compute sensitivity matrices using numerical differentiation
-[dK, dP, dC1, dC2] = prob.compute_sensitivity_autograd();
-
-% Generate code with sensitivity support for adaptive rho
-prob.codegen_with_sensitivity('out', dK, dP, dC1, dC2);
+% Generate code with sensitivity matrices
+solver.codegen_with_sensitivity('out', dK, dP, dC1, dC2);
 ```
 
 See `examples/quadrotor_hover_code_generation.m` for a complete example.
 
 ## API Reference
 
-### Constructor and Setup
-- `solver = TinyMPC()` - Create solver instance
-- `solver.setup(A, B, Q, R, N, ...)` - Setup MPC problem with system matrices
-  - Required: `A` (nx×nx), `B` (nx×nu), `Q` (nx×nx), `R` (nu×nu), `N` (horizon)
-  - Optional: `'rho', value`, `'verbose', true/false`, `'adaptive_rho', true/false`
+### Core Functions
 
-### Problem Configuration
-- `solver.set_x0(x0)` - Set initial state (nx×1)
-- `solver.set_x_ref(x_ref)` - Set state reference trajectory (nx×N)
-- `solver.set_u_ref(u_ref)` - Set input reference trajectory (nu×(N-1))
-- Set constraints in `setup()` using: `'u_min', value`, `'u_max', value`, `'x_min', value`, `'x_max', value`
+```matlab
+% Setup solver with system matrices
+solver.setup(A, B, Q, R, N, 'rho', rho, 'verbose', verbose, ...)
 
-### Solving
-- `solution = solver.solve()` - Solve MPC optimization problem and return solution
-  - `solution.controls` - First optimal control input
-  - `solution.states_all` - Complete state trajectory (nx × N)
-  - `solution.controls_all` - Complete control trajectory (nu × N-1)
-- `solver.reset()` - Reset solver state
+% Set initial state and references
+solver.set_x0(x0)
+solver.set_x_ref(x_ref)
+solver.set_u_ref(u_ref)
 
-### Advanced Features
-- `[Kinf, Pinf, Quu_inv, AmBKt] = solver.compute_cache_terms()` - Compute LQR matrices
-- `[dK, dP, dC1, dC2] = solver.compute_sensitivity_autograd()` - Compute sensitivity matrices
-  - Uses numerical finite differences: `d/drho ≈ (f(rho+h) - f(rho)) / h`
-  - Returns derivatives of K, P, C1, C2 with respect to rho
-- `solver.set_sensitivity_matrices(dK, dP, dC1, dC2)` - Set sensitivity for codegen
+% Solve and get solution
+status = solver.solve()          % Returns status code (0 = success)
+solution = solver.get_solution() % Get actual solution
+```
 
 ### Code Generation
-- `solver.codegen(output_dir)` - Generate standalone C++ code
-- `solver.codegen_with_sensitivity(output_dir, dK, dP, dC1, dC2)` - Generate code with adaptive rho support
 
-## Tests
+```matlab
+% Generate standalone C++ code
+solver.codegen(output_dir)
 
-The `tests/` directory contains scripts for building and testing:
-- `compile_tinympc_matlab.m` - Compile the MEX interface
-- `run_all_tests.m` - Run all tests
+% Generate code with sensitivity matrices
+solver.codegen_with_sensitivity(output_dir, dK, dP, dC1, dC2)
+```
 
-## Build Artifacts
+### Sensitivity Analysis
 
-When you compile, the following files are generated:
-- `tinympc_matlab.mexa64` - Linux
-- `tinympc_matlab.mexmaci64` - Intel macOS
-- `tinympc_matlab.mexmaca64` - Apple Silicon macOS
+```matlab
+% Compute sensitivity matrices using built-in autograd function
+[dK, dP, dC1, dC2] = solver.compute_sensitivity_autograd()
+```
 
-## Documentation
+### Configuration
+
+```matlab
+% Update solver settings
+solver.update_settings('abs_pri_tol', 1e-6, 'abs_dua_tol', 1e-6, 'max_iter', 100, ...)
+
+% Reset solver
+solver.reset()
+```
+
+## Solution Structure
+
+The `solver.get_solution()` function returns a struct with:
+- `solution.states` - Full state trajectory (nx × N matrix)
+- `solution.controls` - Optimal control sequence (nu × (N-1) matrix)
+
+## Testing
+
+Run the test suite:
+```matlab
+addpath('tests');
+run_all_tests;
+```
 
 See [https://tinympc.org/](https://tinympc.org/) for full documentation.

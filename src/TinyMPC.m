@@ -147,21 +147,22 @@ classdef TinyMPC < handle
                 obj.settings.adaptive_rho_max, obj.settings.adaptive_rho_enable_clipping, false);
         end
         
-        function solution = solve(obj)
+        function status = solve(obj)
             % Solve the MPC problem
+            % Returns status code: 0 = success
             obj.check_setup();
             tinympc_matlab('solve', false);
-            [x_traj, u_traj] = tinympc_matlab('get_solution', false);
-            
-            solution = struct();
-            solution.states_all = x_traj;
-            solution.controls_all = u_traj;
-            solution.controls = u_traj(:, 1);
+            status = 0; % Always return 0 for success (matches Julia API)
         end
         
         function solution = get_solution(obj)
-            % Get current solution (alias for solve)
-            solution = obj.solve();
+            % Get current solution
+            obj.check_setup();
+            [x_traj, u_traj] = tinympc_matlab('get_solution', false);
+            
+            solution = struct();
+            solution.states = x_traj;     % Full state trajectory (nx × N matrix)
+            solution.controls = u_traj;   % Optimal control sequence (nu × (N-1) matrix)
         end
         
         function codegen(obj, output_dir)

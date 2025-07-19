@@ -7,7 +7,7 @@ MATLAB wrapper for [TinyMPC](https://tinympc.org/). Supports code generation and
 
 - MATLAB (tested with R2024b and later)
 - C++ compiler with C++17 support
-- **Symbolic Math Toolbox** (required for sensitivity computation and adaptive rho workflows)
+- No additional toolboxes required (numerical differentiation used instead of symbolic)
 
 
 ## Building
@@ -48,70 +48,93 @@ The `examples/` directory contains scripts demonstrating TinyMPC features:
 
 ## Usage Example
 
-### Standard Workflow (No Sensitivity)
+### Basic MPC Workflow
 
 ```matlab
-prob = TinyMPC();
-prob.setup(A, B, Q, R, N, 'rho', 5.0, 'verbose', true);
-prob.set_x_ref(Xref);  % Set state reference trajectory
-prob.set_u_ref(Uref);  % Set input reference trajectory
-prob.codegen('output_dir');
+% Create and setup solver
+solver = TinyMPC();
+solver.setup(A, B, Q, R, N, 'rho', 1.0, 'verbose', false);
+
+% Set initial state and solve
+x0 = [0.5; 0; 0; 0];  % Initial state
+solver.set_x0(x0);
+solution = solver.solve();
+
+% Access solution
+fprintf('First control: %.3f\n', solution.controls(1));
+states_trajectory = solution.states_all;     % All predicted states
+controls_trajectory = solution.controls_all; % All predicted controls
 ```
 
-### Adaptive Rho / Sensitivity Workflow
-
-**Requires Symbolic Math Toolbox**
+### Code Generation Workflow
 
 ```matlab
+% Setup solver with constraints
+solver = TinyMPC();
+u_min = -0.5; u_max = 0.5;  % Control bounds
+solver.setup(A, B, Q, R, N, 'u_min', u_min, 'u_max', u_max, 'rho', 1.0);
+
+
+% Generate C++ code
+solver.codegen('out');
+```
+
+### Sensitivity & Adaptive Rho Workflow
+
+```matlab
+% Setup solver with adaptive rho enabled
 prob = TinyMPC();
-prob.setup(A, B, Q, R, N, 'rho', 5.0, 'verbose', true, 'adaptive_rho', true);
+prob.setup(A, B, Q, R, N, 'rho', 5.0, 'adaptive_rho', true);
+
+% Set reference trajectories
+Xref = zeros(nx, N);      % State reference (nx × N)
+Uref = zeros(nu, N-1);    % Input reference (nu × N-1)
 prob.set_x_ref(Xref);
 prob.set_u_ref(Uref);
 
-% Compute cache terms (LQR solution)
+% Compute LQR cache terms
 [Kinf, Pinf, Quu_inv, AmBKt] = prob.compute_cache_terms();
 
-% Compute exact sensitivity matrices using Symbolic Math Toolbox
+% Compute sensitivity matrices using numerical differentiation
 [dK, dP, dC1, dC2] = prob.compute_sensitivity_autograd();
 
-% Set sensitivity matrices for codegen
-prob.set_sensitivity_matrices(dK, dP, dC1, dC2);
-
-% Generate code with sensitivity
-prob.codegen_with_sensitivity('output_dir', dK, dP, dC1, dC2);
+% Generate code with sensitivity support for adaptive rho
+prob.codegen_with_sensitivity('out', dK, dP, dC1, dC2);
 ```
 
 See `examples/quadrotor_hover_code_generation.m` for a complete example.
-## Notes on Symbolic Math Toolbox
 
-- The method `compute_sensitivity_autograd()` uses symbolic differentiation to compute exact derivatives of the LQR solution with respect to `rho`.
-- This is required for adaptive rho workflows and for generating code with sensitivity matrices.
-- For large systems, symbolic computation may be slow. For typical MPC problems (e.g., cartpole, quadrotor), it is practical and robust.
+## API Reference
 
+### Constructor and Setup
+- `solver = TinyMPC()` - Create solver instance
+- `solver.setup(A, B, Q, R, N, ...)` - Setup MPC problem with system matrices
+  - Required: `A` (nx×nx), `B` (nx×nu), `Q` (nx×nx), `R` (nu×nu), `N` (horizon)
+  - Optional: `'rho', value`, `'verbose', true/false`, `'adaptive_rho', true/false`
 
-## Class Methods
+### Problem Configuration
+- `solver.set_x0(x0)` - Set initial state (nx×1)
+- `solver.set_x_ref(x_ref)` - Set state reference trajectory (nx×N)
+- `solver.set_u_ref(u_ref)` - Set input reference trajectory (nu×(N-1))
+- Set constraints in `setup()` using: `'u_min', value`, `'u_max', value`, `'x_min', value`, `'x_max', value`
 
-**Core:**
-- `TinyMPC(nx, nu, N, A, B, Q, R)`
-- `setup(...)`
-- `solve()`
-- `get_solution()`
-- `reset()`
+### Solving
+- `solution = solver.solve()` - Solve MPC optimization problem and return solution
+  - `solution.controls` - First optimal control input
+  - `solution.states_all` - Complete state trajectory (nx × N)
+  - `solution.controls_all` - Complete control trajectory (nu × N-1)
+- `solver.reset()` - Reset solver state
 
-**State/Reference:**
-- `set_initial_state(x0)`
-- `set_state_reference(x_ref)`
-- `set_input_reference(u_ref)`
-- `set_bounds(x_min, x_max, u_min, u_max)`
+### Advanced Features
+- `[Kinf, Pinf, Quu_inv, AmBKt] = solver.compute_cache_terms()` - Compute LQR matrices
+- `[dK, dP, dC1, dC2] = solver.compute_sensitivity_autograd()` - Compute sensitivity matrices
+  - Uses numerical finite differences: `d/drho ≈ (f(rho+h) - f(rho)) / h`
+  - Returns derivatives of K, P, C1, C2 with respect to rho
+- `solver.set_sensitivity_matrices(dK, dP, dC1, dC2)` - Set sensitivity for codegen
 
-**Advanced:**
-- `compute_cache_terms()`
-- `compute_sensitivity_autograd()`
-- `set_sensitivity_matrices(dK, dP, dC1, dC2)`
-
-**Code Generation:**
-- `codegen(output_dir)`
-- `codegen_with_sensitivity(output_dir, dK, dP, dC1, dC2)`
+### Code Generation
+- `solver.codegen(output_dir)` - Generate standalone C++ code
+- `solver.codegen_with_sensitivity(output_dir, dK, dP, dC1, dC2)` - Generate code with adaptive rho support
 
 ## Tests
 

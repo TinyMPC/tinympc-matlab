@@ -7,7 +7,6 @@ MATLAB wrapper for [TinyMPC](https://tinympc.org/). Supports code generation and
 
 - MATLAB (tested with R2024b and later)
 - C++ compiler with C++17 support
-- No additional toolboxes required (numerical differentiation used instead of symbolic)
 
 
 ## Building

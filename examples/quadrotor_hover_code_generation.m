@@ -11,7 +11,7 @@ addpath(fullfile(repoRoot, 'src'));
 addpath(fullfile(repoRoot, 'build'));
 
 % Enable or disable adaptive rho
-ENABLE_ADAPTIVE_RHO = true;   % Set true to enable adaptive rho
+ENABLE_ADAPTIVE_RHO = false;   % Set true to enable adaptive rho
 
 % Quadrotor system matrices (12 states, 4 inputs)
 rho_value = 5.0;

@@ -91,6 +91,13 @@ classdef TinyMPC < handle
             
             if status == 0
                 obj.is_setup = true;
+                
+                % Push settings to C++ layer (including adaptive_rho settings)
+                tinympc_matlab('update_settings', obj.settings.abs_pri_tol, obj.settings.abs_dua_tol, ...
+                    obj.settings.max_iter, obj.settings.check_termination, obj.settings.en_state_bound, ...
+                    obj.settings.en_input_bound, obj.settings.adaptive_rho, obj.settings.adaptive_rho_min, ...
+                    obj.settings.adaptive_rho_max, obj.settings.adaptive_rho_enable_clipping, false);
+                
                 if opts.verbose, fprintf('TinyMPC solver setup successful (nx=%d, nu=%d, N=%d)\n', obj.nx, obj.nu, obj.N); end
             else
                 error('TinyMPC:SetupFailed', 'Setup failed with status %d', status);

@@ -43,8 +43,9 @@ us = zeros(Nsim-N, 1);
 
 for i = 1:(Nsim-N)
     solver.set_x0(x0);
-    solution = solver.solve();
-    u = solution.controls;
+    status = solver.solve();
+    solution = solver.get_solution();
+    u = solution.controls(:,1);
     x0 = A * x0 + B * u;
     xs(i,:) = x0';
     us(i) = u;

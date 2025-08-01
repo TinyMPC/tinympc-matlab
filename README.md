@@ -5,7 +5,7 @@ MATLAB wrapper for [TinyMPC](https://tinympc.org/). Supports code generation and
 
 ## Prerequisites
 
-- MATLAB (tested with R2024b and later)
+- MATLAB (R2024b +)
 - C++ compiler with C++17 support
 
 
@@ -34,7 +34,7 @@ MATLAB wrapper for [TinyMPC](https://tinympc.org/). Supports code generation and
    % Add paths and test that the module loads correctly
    addpath('src'); addpath('build');
    solver = TinyMPC();
-   disp('✅ TinyMPC MATLAB ready to use!');
+   disp('TinyMPC MATLAB ready to use!');
    ```
 
 ## Examples

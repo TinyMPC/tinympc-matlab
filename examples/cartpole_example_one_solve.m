@@ -28,7 +28,8 @@ solver.setup(A, B, Q, R, N, 'rho', 1.0);
 % Set initial condition and solve
 x0 = [0.5; 0; 0; 0];
 solver.set_x0(x0);
-solution = solver.solve();
+status = solver.solve();
+solution = solver.get_solution();
 
 % Display solution
-disp(solution.controls_all);
+disp(solution.controls);

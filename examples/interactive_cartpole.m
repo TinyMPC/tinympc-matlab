@@ -67,10 +67,11 @@ for k = 1:Nsim
     prob.set_x0(x0);
     
     % 2. Solve MPC problem
-    solution = prob.solve();
+    status = prob.solve();
+    solution = prob.get_solution();
     
     % 3. Get control input
-    u = solution.controls;  % Apply first control input
+    u = solution.controls(:,1);  % Apply first control input
     
     % 4. Simulate system dynamics
     x1 = A * x0 + B * u;

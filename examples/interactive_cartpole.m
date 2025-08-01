@@ -98,28 +98,22 @@ cart = plot(NaN, NaN, 'bo', 'MarkerSize', 20);
 hold on;
 pole = plot(NaN, NaN, 'r-', 'LineWidth', 4);
 
-% Initialize animation objects
-set(cart, 'XData', []);
-set(cart, 'YData', []);
-set(pole, 'XData', []);
-set(pole, 'YData', []);
-xlim([-2.5, 2.5]);
-ylim([-1, 1]);
-
 % Run animation
 for frame = 1:Nsim
-    x = x_all{frame};
-    
-    % Update cart position
-    set(cart, 'XData', x(1), 'YData', 0);
-    
-    % Update pole position (length = 0.5)
-    set(pole, 'XData', [x(1), x(1) - 0.5 * sin(x(3))], ...
-             'YData', [0, 0.5 * cos(x(3))]);
-    
-    drawnow;
-    pause(0.01);
-    F(frame) = getframe(gcf);
+    if frame <= length(x_all)
+        x = x_all{frame};
+        
+        % Update cart position  
+        set(cart, 'XData', x(1), 'YData', 0);
+        
+        % Update pole position (length = 0.5)
+        set(pole, 'XData', [x(1), x(1) - 0.5 * sin(x(3))], ...
+                 'YData', [0, 0.5 * cos(x(3))]);
+        
+        drawnow;
+        pause(0.01);
+        F(frame) = getframe(gcf);
+    end
 end
 
 %%

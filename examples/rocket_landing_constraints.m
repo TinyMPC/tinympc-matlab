@@ -1,10 +1,7 @@
 %% Rocket Landing with Constraints
 % Based on: https://github.com/TinyMPC/TinyMPC/blob/main/examples/rocket_landing_mpc.cpp
-% MATLAB version of the Python rocket_landing_constraints.py example
 
-clear; clc; close all;
-
-% Add TinyMPC class to path (following existing examples)
+% Add TinyMPC class to path 
 currentFile = mfilename('fullpath');
 [scriptPath, ~, ~] = fileparts(currentFile);
 repoRoot = fileparts(scriptPath);
@@ -44,8 +41,8 @@ u_max = [105.0; 105.0; 105.0];
 % SOC constraints 
 cx = [0.5];    % coefficients for state cones (mu)
 cu = [0.25];   % coefficients for input cones (mu)
-Acx = [0];     % start indices for state cones (0-indexed for C++)
-Acu = [0];     % start indices for input cones (0-indexed for C++)
+Acx = [0];     % start indices for state cones 
+Acu = [0];     % start indices for input cones 
 qcx = [3];     % dimensions for state cones
 qcu = [3];     % dimensions for input cones
 
@@ -56,22 +53,21 @@ solver.setup(A, B, Q, R, NHORIZON, 'rho', 1.0, 'fdyn', fdyn, ...
              'max_iter', 100, 'abs_pri_tol', 2e-3, 'verbose', true);
 
 % Set cone constraints 
-solver.set_cone_constraints(Acx, qcx, cx, Acu, qcu, cu);
+solver.set_cone_constraints(Acu, qcu, cu, Acx, qcx, cx);
 
-% Initial and goal states (matching corrected C++ version)
+% Initial and goal states 
 xinit = [4.0; 2.0; 20.0; -3.0; 2.0; -4.5];
 xgoal = [0.0; 0.0; 0.0; 0.0; 0.0; 0.0];
 xinit_scaled = xinit * 1.1;
 
-% Initial reference trajectory (will be updated each step like C++)
+% Initial reference trajectory 
 x_ref = zeros(NSTATES, NHORIZON);
 u_ref = zeros(NINPUTS, NHORIZON-1);
 
-% Animation setup - Extended for longer simulation
 NTOTAL = 100;  % Match C++ 
 x_current = xinit_scaled;  % Match C++ (x0 = xinit * 1.1)
 
-% Set initial reference (match C++ initial setup)
+% Set initial reference 
 % C++: work->Xref.col(i) = xinit + (xg - xinit)*tinytype(i)/(NTOTAL-1);
 % C++ i: 0 to NHORIZON-1, so MATLAB equivalent: (i-1)
 for i = 1:NHORIZON
@@ -89,14 +85,14 @@ constraint_violations = [];
 
 fprintf('Starting rocket landing simulation...\n');
 for k = 1:(NTOTAL - NHORIZON)
-    % Calculate tracking error (match C++ exactly: (x0 - Xref.col(1)).norm())
+    % Calculate tracking error 
     tracking_error = norm(x_current - x_ref(:, 2));  % MATLAB is 1-indexed
     fprintf('tracking error: %.5f\n', tracking_error);
     
     % 1. Update measurement (set current state)
     solver.set_x0(x_current);
     
-    % 2. Update reference trajectory (match C++ exactly)
+    % 2. Update reference trajectory 
     % C++: work->Xref.col(i) = xinit + (xg - xinit)*tinytype(i+k)/(NTOTAL-1);
     % C++ i: 0 to NHORIZON-1, k: 0 to NTOTAL-NHORIZON-1
     % MATLAB i: 1 to NHORIZON, k: 1 to NTOTAL-NHORIZON

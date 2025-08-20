@@ -27,8 +27,8 @@ classdef TinyMPC < handle
             obj.settings.abs_dua_tol = 1e-4;
             obj.settings.max_iter = 100;
             obj.settings.check_termination = 1;
-            obj.settings.en_state_bound = false;
-            obj.settings.en_input_bound = false;
+            obj.settings.en_state_bound = true;
+            obj.settings.en_input_bound = true;
             obj.settings.adaptive_rho = false;
             obj.settings.adaptive_rho_min = 0.1;
             obj.settings.adaptive_rho_max = 10.0;
@@ -54,7 +54,7 @@ classdef TinyMPC < handle
             opts = obj.parse_options(struct('rho', 1.0, 'fdyn', [], 'verbose', false, ...
                 'x_min', [], 'x_max', [], 'u_min', [], 'u_max', [], ...
                 'abs_pri_tol', 1e-4, 'abs_dua_tol', 1e-4, 'max_iter', 100, ...
-                'check_termination', 1, 'en_state_bound', false, 'en_input_bound', false, ...
+                'check_termination', 1, 'en_state_bound', true, 'en_input_bound', true, ...
                 'adaptive_rho', false, 'adaptive_rho_min', 0.1, 'adaptive_rho_max', 10.0, ...
                 'adaptive_rho_enable_clipping', true), varargin{:});
             
@@ -258,113 +258,24 @@ classdef TinyMPC < handle
         
         function set_linear_constraints(obj, Alin_x, blin_x, Alin_u, blin_u)
             % Set linear constraints: Alin_x * x <= blin_x, Alin_u * u <= blin_u
-            % 
-            % Args:
-            %   Alin_x (matrix): State constraint matrix (num_state_constraints x nx)
-            %   blin_x (vector): State constraint bounds (num_state_constraints x 1)
-            %   Alin_u (matrix): Input constraint matrix (num_input_constraints x nu) 
-            %   blin_u (vector): Input constraint bounds (num_input_constraints x 1)
             obj.check_setup();
-            
-            % Validate dimensions
-            if ~isempty(Alin_x)
-                assert(size(Alin_x, 2) == obj.nx, 'Alin_x must have nx columns');
-                assert(size(blin_x, 1) == size(Alin_x, 1), 'blin_x must match Alin_x rows');
-                assert(size(blin_x, 2) == 1, 'blin_x must be a column vector');
-            else
-                Alin_x = zeros(0, obj.nx);
-                blin_x = zeros(0, 1);
-            end
-            
-            if ~isempty(Alin_u)
-                assert(size(Alin_u, 2) == obj.nu, 'Alin_u must have nu columns');
-                assert(size(blin_u, 1) == size(Alin_u, 1), 'blin_u must match Alin_u rows');
-                assert(size(blin_u, 2) == 1, 'blin_u must be a column vector');
-            else
-                Alin_u = zeros(0, obj.nu);
-                blin_u = zeros(0, 1);
-            end
-            
-            % Call MEX function
             tinympc_matlab('set_linear_constraints', Alin_x, blin_x, Alin_u, blin_u, false);
-            fprintf('Linear constraints set: %d state constraints, %d input constraints\n', ...
-                size(Alin_x, 1), size(Alin_u, 1));
         end
         
         function set_cone_constraints(obj, Acu, qcu, cu, Acx, qcx, cx)
             % Set second-order cone constraints (inputs first, then states)
-            %
-            % Args:
-            %   Acx (vector): Start indices for each state cone constraint (integer vector)
-            %   qcx (vector): Dimension of each state cone constraint (integer vector)
-            %   cx (vector): Cone parameter for each state cone constraint
-            %   Acu (vector): Start indices for each input cone constraint (integer vector)
-            %   qcu (vector): Dimension of each input cone constraint (integer vector)
-            %   cu (vector): Cone parameter for each input cone constraint
             obj.check_setup();
-            
-            % Validate dimensions
-            if ~isempty(Acu)
-                assert(length(qcu) == length(Acu), 'qcu must match Acu length');
-                assert(length(cu) == length(Acu), 'cu must match Acu length');
-            else
-                Acu = [];
-                qcu = [];
-                cu = [];
-            end
-            
-            if ~isempty(Acx)
-                assert(length(qcx) == length(Acx), 'qcx must match Acx length');
-                assert(length(cx) == length(Acx), 'cx must match Acx length');
-            else
-                Acx = [];
-                qcx = [];
-                cx = [];
-            end
-            
-            % Ensure column vectors
-            Acu = Acu(:); qcu = qcu(:); cu = cu(:);
-            Acx = Acx(:); qcx = qcx(:); cx = cx(:);
-            
-            % Call MEX function
-            tinympc_matlab('set_cone_constraints', Acx, qcx, cx, Acu, qcu, cu, false); % MEX expects Acx first by historical order
-            fprintf('Cone constraints set: %d input cones, %d state cones\n', ...
-                length(Acu), length(Acx));
+            % Convert to proper types: indices to int32, parameters to double
+            if ~isempty(Acu), Acu = int32(Acu(:)); qcu = int32(qcu(:)); cu = double(cu(:)); end
+            if ~isempty(Acx), Acx = int32(Acx(:)); qcx = int32(qcx(:)); cx = double(cx(:)); end
+            tinympc_matlab('set_cone_constraints', Acu, qcu, cu, Acx, qcx, cx, false);
         end
         
         function set_equality_constraints(obj, Aeq_x, beq_x, Aeq_u, beq_u)
             % Set equality constraints: Aeq_x * x == beq_x, Aeq_u * u == beq_u
-            % Implemented as two inequalities: <= and >=
-            %
-            % Args:
-            %   Aeq_x (matrix): State equality constraint matrix (num_eq_state x nx)
-            %   beq_x (vector): State equality constraint values (num_eq_state x 1)
-            %   Aeq_u (matrix): Input equality constraint matrix (num_eq_input x nu)
-            %   beq_u (vector): Input equality constraint values (num_eq_input x 1)
+            % Implemented as two inequalities: Ax <= b and -Ax <= -b
             obj.check_setup();
-            
-            % Handle empty inputs
-            if isempty(Aeq_x)
-                Aeq_x = zeros(0, obj.nx);
-                beq_x = zeros(0, 1);
-            end
-            if isempty(Aeq_u)
-                Aeq_u = zeros(0, obj.nu);
-                beq_u = zeros(0, 1);
-            end
-            
-            % Create inequality constraints: Ax <= b and -Ax <= -b (equivalent to Ax >= b)
-            % This gives us Ax == b
-            Alin_x = [Aeq_x; -Aeq_x];
-            blin_x = [beq_x; -beq_x];
-            
-            Alin_u = [Aeq_u; -Aeq_u];
-            blin_u = [beq_u; -beq_u];
-            
-            % Set the linear constraints
-            obj.set_linear_constraints(Alin_x, blin_x, Alin_u, blin_u);
-            fprintf('Equality constraints set: %d state equalities, %d input equalities\n', ...
-                size(Aeq_x, 1), size(Aeq_u, 1));
+            obj.set_linear_constraints([Aeq_x; -Aeq_x], [beq_x; -beq_x], [Aeq_u; -Aeq_u], [beq_u; -beq_u]);
         end
         
         function reset(obj)

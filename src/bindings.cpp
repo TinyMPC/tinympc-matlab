@@ -437,106 +437,56 @@ void set_cache_terms(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
     }
 }
 
-// Set linear constraints (matches Python PyTinySolver::set_linear_constraints)
+// Set linear constraints
 void set_linear_constraints(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
-    if (nrhs != 5) {
-        mexErrMsgIdAndTxt("TinyMPC:InvalidInput", "set_linear_constraints requires 5 input arguments");
+    if (nrhs != 5 || !g_solver) {
+        mexErrMsgIdAndTxt("TinyMPC:InvalidInput", "Invalid arguments or solver not initialized");
     }
     
-    if (!g_solver) {
-        mexErrMsgIdAndTxt("TinyMPC:NotInitialized", "Solver not initialized");
-    }
+    auto Alin_x = matlab_to_eigen(prhs[0]).cast<tinytype>();
+    auto blin_x = matlab_to_eigen(prhs[1]).cast<tinytype>();
+    auto Alin_u = matlab_to_eigen(prhs[2]).cast<tinytype>();
+    auto blin_u = matlab_to_eigen(prhs[3]).cast<tinytype>();
     
-    auto Alin_x = matlab_to_eigen(prhs[0]);
-    auto blin_x = matlab_to_eigen(prhs[1]);
-    auto Alin_u = matlab_to_eigen(prhs[2]);
-    auto blin_u = matlab_to_eigen(prhs[3]);
-    int verbose = (int)mxGetScalar(prhs[4]);
-    
-    try {
-        // Convert matrices to proper format for C++ API
-        tinyMatrix Alin_x_tiny = Alin_x.cast<tinytype>();
-        tinyVector blin_x_tiny = blin_x.cast<tinytype>();
-        tinyMatrix Alin_u_tiny = Alin_u.cast<tinytype>();
-        tinyVector blin_u_tiny = blin_u.cast<tinytype>();
-        
-        // Call C++ API function
-        int status = tiny_set_linear_constraints(g_solver.get(), Alin_x_tiny, blin_x_tiny, Alin_u_tiny, blin_u_tiny);
-        
-        if (status != 0) {
-            mexErrMsgIdAndTxt("TinyMPC:SetLinearConstraintsFailed", "tiny_set_linear_constraints failed with status %d", status);
-        }
-        
-        if (verbose) {
-            mexPrintf("Linear constraints set successfully\n");
-            mexPrintf("State constraints: %dx%d matrix, Input constraints: %dx%d matrix\n", 
-                      (int)Alin_x.rows(), (int)Alin_x.cols(), (int)Alin_u.rows(), (int)Alin_u.cols());
-        }
-        
-    } catch (const std::exception& e) {
-        mexErrMsgIdAndTxt("TinyMPC:SetLinearConstraintsException", 
-            "Error setting linear constraints: %s", e.what());
+    int status = tiny_set_linear_constraints(g_solver.get(), Alin_x, blin_x, Alin_u, blin_u);
+    if (status != 0) {
+        mexErrMsgIdAndTxt("TinyMPC:SetLinearConstraintsFailed", "Failed with status %d", status);
     }
 }
 
 // Helper function to convert MATLAB array to Eigen VectorXi
 Eigen::VectorXi matlab_to_eigen_vectorxi(const mxArray* mx_array) {
-    if (!mxIsDouble(mx_array) || mxIsComplex(mx_array)) {
-        mexErrMsgIdAndTxt("TinyMPC:InvalidInput", "Input must be a real double array");
+    size_t size = mxGetM(mx_array) * mxGetN(mx_array);
+    Eigen::VectorXi result(size);
+    
+    if (mxIsInt32(mx_array)) {
+        int32_t* data = (int32_t*)mxGetData(mx_array);
+        for (size_t i = 0; i < size; ++i) result(i) = data[i];
+    } else if (mxIsDouble(mx_array)) {
+        double* data = mxGetPr(mx_array);
+        for (size_t i = 0; i < size; ++i) result(i) = (int)round(data[i]);
+    } else {
+        mexErrMsgIdAndTxt("TinyMPC:InvalidInput", "Input must be int32 or double array");
     }
-    
-    size_t rows = mxGetM(mx_array);
-    size_t cols = mxGetN(mx_array);
-    double* data = mxGetPr(mx_array);
-    
-    // Convert to integer vector
-    Eigen::VectorXi result(rows * cols);
-    for (size_t i = 0; i < rows * cols; ++i) {
-        result(i) = (int)data[i];
-    }
-    
     return result;
 }
 
 // Set conic constraints (inputs first, then states)  
 void set_cone_constraints(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
-    if (nrhs != 7) {
-        mexErrMsgIdAndTxt("TinyMPC:InvalidInput", "set_cone_constraints requires 7 input arguments");
+    if (nrhs != 7 || !g_solver) {
+        mexErrMsgIdAndTxt("TinyMPC:InvalidInput", "Invalid arguments or solver not initialized");
     }
     
-    if (!g_solver) {
-        mexErrMsgIdAndTxt("TinyMPC:NotInitialized", "Solver not initialized");
-    }
-    
-    // Expected order now: Acu, qcu, cu, Acx, qcx, cx
     auto Acu = matlab_to_eigen_vectorxi(prhs[0]);
     auto qcu = matlab_to_eigen_vectorxi(prhs[1]);
-    auto cu = matlab_to_eigen(prhs[2]);
+    auto cu = matlab_to_eigen(prhs[2]).cast<tinytype>();
     auto Acx = matlab_to_eigen_vectorxi(prhs[3]);
     auto qcx = matlab_to_eigen_vectorxi(prhs[4]);
-    auto cx = matlab_to_eigen(prhs[5]);
-    int verbose = (int)mxGetScalar(prhs[6]);
+    auto cx = matlab_to_eigen(prhs[5]).cast<tinytype>();
     
-    try {
-        // Convert matrices to proper format for C++ API
-        tinyVector cx_tiny = cx.cast<tinytype>();
-        tinyVector cu_tiny = cu.cast<tinytype>();
-        
-        // Call C++ API function (inputs first, states second)
-        int status = tiny_set_cone_constraints(g_solver.get(), Acu, qcu, cu_tiny, Acx, qcx, cx_tiny);
-        
-        if (status != 0) {
-            mexErrMsgIdAndTxt("TinyMPC:SetConeConstraintsFailed", "tiny_set_cone_constraints failed with status %d", status);
-        }
-        
-        if (verbose) {
-            mexPrintf("Cone constraints set successfully\n");
-            mexPrintf("Input cones: %d, State cones: %d\n", (int)Acu.rows(), (int)Acx.rows());
-        }
-        
-    } catch (const std::exception& e) {
-        mexErrMsgIdAndTxt("TinyMPC:SetConeConstraintsException", 
-            "Error setting cone constraints: %s", e.what());
+    int status = tiny_set_cone_constraints(g_solver.get(), Acu, qcu, cu, Acx, qcx, cx);
+    if (status != 0) {
+        mexErrMsgIdAndTxt("TinyMPC:SetConeConstraintsFailed", "Failed with status %d", status);
     }
 }
 

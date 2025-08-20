@@ -186,13 +186,7 @@ void set_u_ref(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
 
 // Set bound constraints
 void set_bound_constraints(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
-    if (nrhs != 5) {
-        mexErrMsgIdAndTxt("TinyMPC:InvalidInput", "set_bound_constraints requires 5 input arguments");
-    }
-    
-    if (!g_solver) {
-        mexErrMsgIdAndTxt("TinyMPC:NotInitialized", "Solver not initialized");
-    }
+    if (!g_solver) mexErrMsgIdAndTxt("TinyMPC:NotInitialized", "Solver not initialized");
     
     auto x_min = matlab_to_eigen(prhs[0]);
     auto x_max = matlab_to_eigen(prhs[1]);
@@ -205,20 +199,13 @@ void set_bound_constraints(int nlhs, mxArray* plhs[], int nrhs, const mxArray* p
     tinyMatrix u_min_tiny = u_min.cast<tinytype>();
     tinyMatrix u_max_tiny = u_max.cast<tinytype>();
     
-    // Use the API function 
     int status = tiny_set_bound_constraints(g_solver.get(), x_min_tiny, x_max_tiny, u_min_tiny, u_max_tiny);
-    
-    if (status != 0) {
-        mexErrMsgIdAndTxt("TinyMPC:SetBoundConstraintsFailed", "tiny_set_bound_constraints failed with status %d", status);
-    }
-    
+    if (status != 0) mexErrMsgIdAndTxt("TinyMPC:SetBoundConstraintsFailed", "status %d", status);
+
     // Auto-enable bound constraints after successful setting
     g_solver->settings->en_state_bound = 1;
     g_solver->settings->en_input_bound = 1;
-    
-    if (verbose) {
-        mexPrintf("Bound constraints set\n");
-    }
+    if (verbose) mexPrintf("Bound constraints set\n");
 }
 
 // Solve the MPC problem (matches Python solve)
@@ -419,42 +406,18 @@ void set_cache_terms(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
 
 // Set linear constraints
 void set_linear_constraints(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
-    if (nrhs != 5 || !g_solver) {
-        mexErrMsgIdAndTxt("TinyMPC:InvalidInput", "Invalid arguments or solver not initialized");
-    }
-    
+    if (!g_solver) mexErrMsgIdAndTxt("TinyMPC:NotInitialized", "Solver not initialized");
+
     auto Alin_x = matlab_to_eigen(prhs[0]).cast<tinytype>();
     Eigen::MatrixXd blin_x_in = matlab_to_eigen(prhs[1]);
     auto Alin_u = matlab_to_eigen(prhs[2]).cast<tinytype>();
     Eigen::MatrixXd blin_u_in = matlab_to_eigen(prhs[3]);
-
-    // Normalize b vectors to column vectors (Eigen's tinyVector expectation)
-    Eigen::Matrix<tinytype, Eigen::Dynamic, 1> blin_x;
-    if (blin_x_in.size() == 0) {
-        blin_x.resize(0);
-    } else if (blin_x_in.cols() == 1) {
-        blin_x = blin_x_in.cast<tinytype>();
-    } else if (blin_x_in.rows() == 1) {
-        blin_x = blin_x_in.transpose().cast<tinytype>();
-    } else {
-        mexErrMsgIdAndTxt("TinyMPC:InvalidInput", "blin_x must be a vector (Nx1 or 1xN)");
-    }
-
-    Eigen::Matrix<tinytype, Eigen::Dynamic, 1> blin_u;
-    if (blin_u_in.size() == 0) {
-        blin_u.resize(0);
-    } else if (blin_u_in.cols() == 1) {
-        blin_u = blin_u_in.cast<tinytype>();
-    } else if (blin_u_in.rows() == 1) {
-        blin_u = blin_u_in.transpose().cast<tinytype>();
-    } else {
-        mexErrMsgIdAndTxt("TinyMPC:InvalidInput", "blin_u must be a vector (Mx1 or 1xM)");
-    }
+    // Flatten b vectors to column (accept 1xK or Kx1)
+    Eigen::Matrix<tinytype, Eigen::Dynamic, 1> blin_x = Eigen::Map<Eigen::VectorXd>(blin_x_in.data(), (int)blin_x_in.size()).cast<tinytype>();
+    Eigen::Matrix<tinytype, Eigen::Dynamic, 1> blin_u = Eigen::Map<Eigen::VectorXd>(blin_u_in.data(), (int)blin_u_in.size()).cast<tinytype>();
     
     int status = tiny_set_linear_constraints(g_solver.get(), Alin_x, blin_x, Alin_u, blin_u);
-    if (status != 0) {
-        mexErrMsgIdAndTxt("TinyMPC:SetLinearConstraintsFailed", "Failed with status %d", status);
-    }
+    if (status != 0) mexErrMsgIdAndTxt("TinyMPC:SetLinearConstraintsFailed", "status %d", status);
     
     // Auto-enable linear constraints after successful setting
     bool has_state_linear = (Alin_x.rows() > 0 && blin_x.rows() > 0);
@@ -485,9 +448,7 @@ Eigen::VectorXi matlab_to_eigen_vectorxi(const mxArray* mx_array) {
 
 // Set conic constraints (inputs first, then states)  
 void set_cone_constraints(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
-    if (nrhs != 7 || !g_solver) {
-        mexErrMsgIdAndTxt("TinyMPC:InvalidInput", "Invalid arguments or solver not initialized");
-    }
+    if (!g_solver) mexErrMsgIdAndTxt("TinyMPC:NotInitialized", "Solver not initialized");
     
     auto Acu = matlab_to_eigen_vectorxi(prhs[0]);
     auto qcu = matlab_to_eigen_vectorxi(prhs[1]);
@@ -495,35 +456,13 @@ void set_cone_constraints(int nlhs, mxArray* plhs[], int nrhs, const mxArray* pr
     auto Acx = matlab_to_eigen_vectorxi(prhs[3]);
     auto qcx = matlab_to_eigen_vectorxi(prhs[4]);
     Eigen::MatrixXd cx_in = matlab_to_eigen(prhs[5]);
-
-    // Normalize cu/cx to column vectors (0-length is allowed)
-    Eigen::VectorXd cu_vec;
-    if (cu_in.size() == 0) {
-        cu_vec.resize(0);
-    } else if (cu_in.cols() == 1) {
-        cu_vec = cu_in.col(0);
-    } else if (cu_in.rows() == 1) {
-        cu_vec = cu_in.transpose().col(0);
-    } else {
-        mexErrMsgIdAndTxt("TinyMPC:InvalidInput", "cu must be a vector (Kx1 or 1xK)");
-    }
-
-    Eigen::VectorXd cx_vec;
-    if (cx_in.size() == 0) {
-        cx_vec.resize(0);
-    } else if (cx_in.cols() == 1) {
-        cx_vec = cx_in.col(0);
-    } else if (cx_in.rows() == 1) {
-        cx_vec = cx_in.transpose().col(0);
-    } else {
-        mexErrMsgIdAndTxt("TinyMPC:InvalidInput", "cx must be a vector (Kx1 or 1xK)");
-    }
+    // Flatten cu/cx to column vectors (accept 1xK or Kx1)
+    Eigen::VectorXd cu_vec = Eigen::Map<Eigen::VectorXd>(cu_in.data(), (int)cu_in.size());
+    Eigen::VectorXd cx_vec = Eigen::Map<Eigen::VectorXd>(cx_in.data(), (int)cx_in.size());
     
     int status = tiny_set_cone_constraints(g_solver.get(), Acu, qcu, cu_vec.cast<tinytype>(),
                                            Acx, qcx, cx_vec.cast<tinytype>());
-    if (status != 0) {
-        mexErrMsgIdAndTxt("TinyMPC:SetConeConstraintsFailed", "Failed with status %d", status);
-    }
+    if (status != 0) mexErrMsgIdAndTxt("TinyMPC:SetConeConstraintsFailed", "status %d", status);
     
     // Auto-enable cone constraints after successful setting
     bool has_state_cones = (Acx.size() > 0 && qcx.size() > 0 && cx_vec.size() > 0);

@@ -109,21 +109,11 @@ classdef TinyMPC < handle
             tinympc_matlab('set_x0', x0(:), false);
         end
         
-        function set_initial_state(obj, x0)
-            % Alias for set_x0 (compatibility)
-            obj.set_x0(x0);
-        end
-        
         function set_x_ref(obj, x_ref)
             % Set state reference trajectory
             obj.check_setup();
             x_ref_expanded = obj.expand_matrix(x_ref, obj.nx, obj.N);
             tinympc_matlab('set_x_ref', x_ref_expanded, false);
-        end
-        
-        function set_state_reference(obj, x_ref)
-            % Alias for set_x_ref (compatibility)
-            obj.set_x_ref(x_ref);
         end
         
         function set_u_ref(obj, u_ref)
@@ -133,14 +123,8 @@ classdef TinyMPC < handle
             tinympc_matlab('set_u_ref', u_ref_expanded, false);
         end
         
-        function set_input_reference(obj, u_ref)
-            % Alias for set_u_ref (compatibility)
-            obj.set_u_ref(u_ref);
-        end
-        
         function update_settings(obj, varargin)
-            % Update solver settings
-            % Usage: obj.update_settings('max_iter', 200, 'abs_pri_tol', 1e-5)
+            % Update solver settings (flags and tolerances)
             obj.check_setup();
             for i = 1:2:length(varargin)
                 if isfield(obj.settings, varargin{i})
@@ -257,7 +241,7 @@ classdef TinyMPC < handle
         end
         
         function set_linear_constraints(obj, Alin_x, blin_x, Alin_u, blin_u)
-            % Set linear constraints: Alin_x * x <= blin_x, Alin_u * u <= blin_u
+            % Linear constraints: Alin_x * x <= blin_x, Alin_u * u <= blin_u
             obj.check_setup();
             tinympc_matlab('set_linear_constraints', Alin_x, blin_x, Alin_u, blin_u, false);
             
@@ -270,7 +254,7 @@ classdef TinyMPC < handle
         end
         
         function set_bound_constraints(obj, x_min, x_max, u_min, u_max)
-            % Set box constraints: x_min <= x <= x_max, u_min <= u <= u_max
+            % Bounds: x_min <= x <= x_max, u_min <= u <= u_max
             obj.check_setup();
             
             % Process bounds with simple expansion
@@ -294,7 +278,7 @@ classdef TinyMPC < handle
         end
         
         function set_cone_constraints(obj, Acu, qcu, cu, Acx, qcx, cx)
-            % Set second-order cone constraints (inputs first, then states)
+            % SOC constraints (inputs first, then states)
             obj.check_setup();
             % Convert to proper types: indices to int32, parameters to double
             if ~isempty(Acu), Acu = int32(Acu(:)); qcu = int32(qcu(:)); cu = double(cu(:)); end
@@ -310,8 +294,8 @@ classdef TinyMPC < handle
         end
         
         function set_equality_constraints(obj, Aeq_x, beq_x, Aeq_u, beq_u)
-            % Set equality constraints: Aeq_x * x == beq_x, Aeq_u * u == beq_u
-            % Implemented internally as paired inequalities in C++
+            % Equality constraints: Aeq_x * x == beq_x, Aeq_u * u == beq_u
+            % Implemented as two inequalities per row and delegated to linear API
             obj.check_setup();
             
             % Normalize beq inputs to column vectors for safety

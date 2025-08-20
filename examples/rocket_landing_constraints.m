@@ -49,8 +49,9 @@ qcu = [3];     % dimensions for input cones
 % Setup solver
 solver = TinyMPC();
 solver.setup(A, B, Q, R, NHORIZON, 'rho', 1.0, 'fdyn', fdyn, ...
-             'x_min', x_min, 'x_max', x_max, 'u_min', u_min, 'u_max', u_max, ...
              'max_iter', 100, 'abs_pri_tol', 2e-3, 'verbose', true);
+
+solver.set_bound_constraints(x_min, x_max, u_min, u_max);
 
 % Set cone constraints 
 solver.set_cone_constraints(Acu, qcu, cu, Acx, qcx, cx);
@@ -64,14 +65,12 @@ xinit_scaled = xinit * 1.1;
 x_ref = zeros(NSTATES, NHORIZON);
 u_ref = zeros(NINPUTS, NHORIZON-1);
 
-NTOTAL = 100;  % Match C++ 
-x_current = xinit_scaled;  % Match C++ (x0 = xinit * 1.1)
+NTOTAL = 100;  
+x_current = xinit_scaled;  
 
 % Set initial reference 
-% C++: work->Xref.col(i) = xinit + (xg - xinit)*tinytype(i)/(NTOTAL-1);
-% C++ i: 0 to NHORIZON-1, so MATLAB equivalent: (i-1)
 for i = 1:NHORIZON
-    x_ref(:, i) = xinit + (xgoal - xinit) * (i-1) / (NTOTAL - 1);  % Use NTOTAL-1 like C++
+    x_ref(:, i) = xinit + (xgoal - xinit) * (i-1) / (NTOTAL - 1);  
 end
 u_ref(3, :) = 10.0;  % Hover thrust
 
@@ -93,10 +92,6 @@ for k = 1:(NTOTAL - NHORIZON)
     solver.set_x0(x_current);
     
     % 2. Update reference trajectory 
-    % C++: work->Xref.col(i) = xinit + (xg - xinit)*tinytype(i+k)/(NTOTAL-1);
-    % C++ i: 0 to NHORIZON-1, k: 0 to NTOTAL-NHORIZON-1
-    % MATLAB i: 1 to NHORIZON, k: 1 to NTOTAL-NHORIZON
-    % So MATLAB equivalent: (i-1)+(k-1) = i+k-2
     for i = 1:NHORIZON
         x_ref(:, i) = xinit + (xgoal - xinit) * (i + k - 2) / (NTOTAL - 1);
         if i <= NHORIZON - 1

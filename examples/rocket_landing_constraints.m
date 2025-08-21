@@ -54,7 +54,7 @@ solver.setup(A, B, Q, R, NHORIZON, 'rho', 1.0, 'fdyn', fdyn, ...
 solver.set_bound_constraints(x_min, x_max, u_min, u_max);
 
 % Set cone constraints 
-solver.set_cone_constraints(Acu, qcu, cu, Acx, qcx, cx);
+solver.set_cone_constraints(Acx, qcx, cx, Acu, qcu, cu);
 
 % Initial and goal states 
 xinit = [4.0; 2.0; 20.0; -3.0; 2.0; -4.5];

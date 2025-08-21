@@ -277,13 +277,13 @@ classdef TinyMPC < handle
             obj.update_settings(); % Push to C++ layer
         end
         
-        function set_cone_constraints(obj, Acu, qcu, cu, Acx, qcx, cx)
-            % SOC constraints (inputs first, then states)
+        function set_cone_constraints(obj, Acx, qcx, cx, Acu, qcu, cu)
+            % SOC constraints (states first, then inputs)
             obj.check_setup();
             % Convert to proper types: indices to int32, parameters to double
-            if ~isempty(Acu), Acu = int32(Acu(:)); qcu = int32(qcu(:)); cu = double(cu(:)); end
             if ~isempty(Acx), Acx = int32(Acx(:)); qcx = int32(qcx(:)); cx = double(cx(:)); end
-            tinympc_matlab('set_cone_constraints', Acu, qcu, cu, Acx, qcx, cx, false);
+            if ~isempty(Acu), Acu = int32(Acu(:)); qcu = int32(qcu(:)); cu = double(cu(:)); end
+            tinympc_matlab('set_cone_constraints', Acx, qcx, cx, Acu, qcu, cu, false);
             
             % Auto-enable cone constraints after successful setting
             obj.settings.en_state_soc = ~isempty(Acx) && ~isempty(qcx) && ~isempty(cx);

@@ -160,8 +160,8 @@ solver.set_bound_constraints(x_min, x_max, u_min, u_max);
 % Linear inequalities
 solver.set_linear_constraints(Alin_x, blin_x, Alin_u, blin_u);
 
-% Second-order cones (inputs first, then states)
-solver.set_cone_constraints(Acu, qcu, cu, Acx, qcx, cx);
+% Second-order cones (states first, then inputs)
+solver.set_cone_constraints(Acx, qcx, cx, Acu, qcu, cu);
 
 % Equality constraints (implemented as paired inequalities)
 % Aeq_x * x == beq_x, Aeq_u * u == beq_u

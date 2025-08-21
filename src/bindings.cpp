@@ -450,16 +450,18 @@ Eigen::VectorXi matlab_to_eigen_vectorxi(const mxArray* mx_array) {
 void set_cone_constraints(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
     if (!g_solver) mexErrMsgIdAndTxt("TinyMPC:NotInitialized", "Solver not initialized");
     
-    auto Acu = matlab_to_eigen_vectorxi(prhs[0]);
-    auto qcu = matlab_to_eigen_vectorxi(prhs[1]);
-    Eigen::MatrixXd cu_in = matlab_to_eigen(prhs[2]);
-    auto Acx = matlab_to_eigen_vectorxi(prhs[3]);
-    auto qcx = matlab_to_eigen_vectorxi(prhs[4]);
-    Eigen::MatrixXd cx_in = matlab_to_eigen(prhs[5]);
+    // MATLAB public API: state-first, then input
+    auto Acx = matlab_to_eigen_vectorxi(prhs[0]);
+    auto qcx = matlab_to_eigen_vectorxi(prhs[1]);
+    Eigen::MatrixXd cx_in = matlab_to_eigen(prhs[2]);
+    auto Acu = matlab_to_eigen_vectorxi(prhs[3]);
+    auto qcu = matlab_to_eigen_vectorxi(prhs[4]);
+    Eigen::MatrixXd cu_in = matlab_to_eigen(prhs[5]);
     // Flatten cu/cx to column vectors (accept 1xK or Kx1)
-    Eigen::VectorXd cu_vec = Eigen::Map<Eigen::VectorXd>(cu_in.data(), (int)cu_in.size());
     Eigen::VectorXd cx_vec = Eigen::Map<Eigen::VectorXd>(cx_in.data(), (int)cx_in.size());
+    Eigen::VectorXd cu_vec = Eigen::Map<Eigen::VectorXd>(cu_in.data(), (int)cu_in.size());
     
+    // Core expects input-first, then state
     int status = tiny_set_cone_constraints(g_solver.get(), Acu, qcu, cu_vec.cast<tinytype>(),
                                            Acx, qcx, cx_vec.cast<tinytype>());
     if (status != 0) mexErrMsgIdAndTxt("TinyMPC:SetConeConstraintsFailed", "status %d", status);

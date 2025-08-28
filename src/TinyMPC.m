@@ -29,6 +29,10 @@ classdef TinyMPC < handle
             obj.settings.check_termination = 1;
             obj.settings.en_state_bound = false;
             obj.settings.en_input_bound = false;
+            obj.settings.en_state_soc = false;
+            obj.settings.en_input_soc = false;
+            obj.settings.en_state_linear = false;
+            obj.settings.en_input_linear = false;
             obj.settings.adaptive_rho = false;
             obj.settings.adaptive_rho_min = 0.1;
             obj.settings.adaptive_rho_max = 10.0;
@@ -36,7 +40,7 @@ classdef TinyMPC < handle
         end
         
         function setup(obj, A, B, Q, R, N, varargin)
-            % Setup the TinyMPC solver
+            % Setup the TinyMPC solver 
             % Usage: obj.setup(A, B, Q, R, N, 'rho', 1.5, 'verbose', true)
             
             % Basic dimension validation
@@ -52,7 +56,6 @@ classdef TinyMPC < handle
             
             % Parse options using name-value pairs
             opts = obj.parse_options(struct('rho', 1.0, 'fdyn', [], 'verbose', false, ...
-                'x_min', [], 'x_max', [], 'u_min', [], 'u_max', [], ...
                 'abs_pri_tol', 1e-4, 'abs_dua_tol', 1e-4, 'max_iter', 100, ...
                 'check_termination', 1, 'en_state_bound', false, 'en_input_bound', false, ...
                 'adaptive_rho', false, 'adaptive_rho_min', 0.1, 'adaptive_rho_max', 10.0, ...
@@ -65,8 +68,9 @@ classdef TinyMPC < handle
             obj.settings.abs_dua_tol = opts.abs_dua_tol;
             obj.settings.max_iter = opts.max_iter;
             obj.settings.check_termination = opts.check_termination;
-            obj.settings.en_state_bound = opts.en_state_bound;
-            obj.settings.en_input_bound = opts.en_input_bound;
+            % Do not enable bound constraints in setup; only via set_bound_constraints
+            obj.settings.en_state_bound = false;
+            obj.settings.en_input_bound = false;
             obj.settings.adaptive_rho = opts.adaptive_rho;
             obj.settings.adaptive_rho_min = opts.adaptive_rho_min;
             obj.settings.adaptive_rho_max = opts.adaptive_rho_max;
@@ -79,15 +83,9 @@ classdef TinyMPC < handle
                 fdyn = opts.fdyn;
             end
             
-            % Process bounds with simple expansion
-            obj.x_min = obj.expand_bounds(opts.x_min, obj.nx, obj.N, -1e17);
-            obj.x_max = obj.expand_bounds(opts.x_max, obj.nx, obj.N, +1e17);
-            obj.u_min = obj.expand_bounds(opts.u_min, obj.nu, obj.N-1, -1e17);
-            obj.u_max = obj.expand_bounds(opts.u_max, obj.nu, obj.N-1, +1e17);
-            
             % Call MEX setup function
             status = tinympc_matlab('setup', obj.A, obj.B, fdyn, obj.Q, obj.R, ...
-                obj.rho, obj.nx, obj.nu, obj.N, obj.x_min, obj.x_max, obj.u_min, obj.u_max, opts.verbose);
+                obj.rho, obj.nx, obj.nu, obj.N, opts.verbose);
             
             if status == 0
                 obj.is_setup = true;
@@ -95,8 +93,9 @@ classdef TinyMPC < handle
                 % Push settings to C++ layer (including adaptive_rho settings)
                 tinympc_matlab('update_settings', obj.settings.abs_pri_tol, obj.settings.abs_dua_tol, ...
                     obj.settings.max_iter, obj.settings.check_termination, obj.settings.en_state_bound, ...
-                    obj.settings.en_input_bound, obj.settings.adaptive_rho, obj.settings.adaptive_rho_min, ...
-                    obj.settings.adaptive_rho_max, obj.settings.adaptive_rho_enable_clipping, false);
+                    obj.settings.en_input_bound, obj.settings.en_state_soc, obj.settings.en_input_soc, ...
+                    obj.settings.en_state_linear, obj.settings.en_input_linear, obj.settings.adaptive_rho, ...
+                    obj.settings.adaptive_rho_min, obj.settings.adaptive_rho_max, obj.settings.adaptive_rho_enable_clipping, false);
                 
                 if opts.verbose, fprintf('TinyMPC solver setup successful (nx=%d, nu=%d, N=%d)\n', obj.nx, obj.nu, obj.N); end
             else
@@ -110,21 +109,11 @@ classdef TinyMPC < handle
             tinympc_matlab('set_x0', x0(:), false);
         end
         
-        function set_initial_state(obj, x0)
-            % Alias for set_x0 (compatibility)
-            obj.set_x0(x0);
-        end
-        
         function set_x_ref(obj, x_ref)
             % Set state reference trajectory
             obj.check_setup();
             x_ref_expanded = obj.expand_matrix(x_ref, obj.nx, obj.N);
             tinympc_matlab('set_x_ref', x_ref_expanded, false);
-        end
-        
-        function set_state_reference(obj, x_ref)
-            % Alias for set_x_ref (compatibility)
-            obj.set_x_ref(x_ref);
         end
         
         function set_u_ref(obj, u_ref)
@@ -134,14 +123,8 @@ classdef TinyMPC < handle
             tinympc_matlab('set_u_ref', u_ref_expanded, false);
         end
         
-        function set_input_reference(obj, u_ref)
-            % Alias for set_u_ref (compatibility)
-            obj.set_u_ref(u_ref);
-        end
-        
         function update_settings(obj, varargin)
-            % Update solver settings
-            % Usage: obj.update_settings('max_iter', 200, 'abs_pri_tol', 1e-5)
+            % Update solver settings (flags and tolerances)
             obj.check_setup();
             for i = 1:2:length(varargin)
                 if isfield(obj.settings, varargin{i})
@@ -150,8 +133,9 @@ classdef TinyMPC < handle
             end
             tinympc_matlab('update_settings', obj.settings.abs_pri_tol, obj.settings.abs_dua_tol, ...
                 obj.settings.max_iter, obj.settings.check_termination, obj.settings.en_state_bound, ...
-                obj.settings.en_input_bound, obj.settings.adaptive_rho, obj.settings.adaptive_rho_min, ...
-                obj.settings.adaptive_rho_max, obj.settings.adaptive_rho_enable_clipping, false);
+                obj.settings.en_input_bound, obj.settings.en_state_soc, obj.settings.en_input_soc, ...
+                obj.settings.en_state_linear, obj.settings.en_input_linear, obj.settings.adaptive_rho, ...
+                obj.settings.adaptive_rho_min, obj.settings.adaptive_rho_max, obj.settings.adaptive_rho_enable_clipping, false);
         end
         
         function status = solve(obj)
@@ -254,6 +238,82 @@ classdef TinyMPC < handle
             dP = (P1 - P0) / h;
             dC1 = (C1_1 - C1_0) / h;
             dC2 = (C2_1 - C2_0) / h;
+        end
+        
+        function set_linear_constraints(obj, Alin_x, blin_x, Alin_u, blin_u)
+            % Linear constraints: Alin_x * x <= blin_x, Alin_u * u <= blin_u
+            obj.check_setup();
+            tinympc_matlab('set_linear_constraints', Alin_x, blin_x, Alin_u, blin_u, false);
+            
+            % Auto-enable linear constraints after successful setting
+            obj.settings.en_state_linear = ~isempty(Alin_x) && ~isempty(blin_x);
+            obj.settings.en_input_linear = ~isempty(Alin_u) && ~isempty(blin_u);
+            if obj.settings.en_state_linear || obj.settings.en_input_linear
+                obj.update_settings(); % Push to C++ layer
+            end
+        end
+        
+        function set_bound_constraints(obj, x_min, x_max, u_min, u_max)
+            % Bounds: x_min <= x <= x_max, u_min <= u <= u_max
+            obj.check_setup();
+            
+            % Process bounds with simple expansion
+            x_min_expanded = obj.expand_bounds(x_min, obj.nx, obj.N, -1e17);
+            x_max_expanded = obj.expand_bounds(x_max, obj.nx, obj.N, +1e17);
+            u_min_expanded = obj.expand_bounds(u_min, obj.nu, obj.N-1, -1e17);
+            u_max_expanded = obj.expand_bounds(u_max, obj.nu, obj.N-1, +1e17);
+            
+            % Update stored bounds
+            obj.x_min = x_min_expanded;
+            obj.x_max = x_max_expanded;
+            obj.u_min = u_min_expanded;
+            obj.u_max = u_max_expanded;
+            
+            tinympc_matlab('set_bound_constraints', x_min_expanded, x_max_expanded, u_min_expanded, u_max_expanded, false);
+            
+            % Auto-enable bound constraints after successful setting
+            obj.settings.en_state_bound = true;
+            obj.settings.en_input_bound = true;
+            obj.update_settings(); % Push to C++ layer
+        end
+        
+        function set_cone_constraints(obj, Acx, qcx, cx, Acu, qcu, cu)
+            % SOC constraints (states first, then inputs)
+            obj.check_setup();
+            % Convert to proper types: indices to int32, parameters to double
+            if ~isempty(Acx), Acx = int32(Acx(:)); qcx = int32(qcx(:)); cx = double(cx(:)); end
+            if ~isempty(Acu), Acu = int32(Acu(:)); qcu = int32(qcu(:)); cu = double(cu(:)); end
+            tinympc_matlab('set_cone_constraints', Acx, qcx, cx, Acu, qcu, cu, false);
+            
+            % Auto-enable cone constraints after successful setting
+            obj.settings.en_state_soc = ~isempty(Acx) && ~isempty(qcx) && ~isempty(cx);
+            obj.settings.en_input_soc = ~isempty(Acu) && ~isempty(qcu) && ~isempty(cu);
+            if obj.settings.en_state_soc || obj.settings.en_input_soc
+                obj.update_settings(); % Push to C++ layer
+            end
+        end
+        
+        function set_equality_constraints(obj, Aeq_x, beq_x, Aeq_u, beq_u)
+            % Equality constraints: Aeq_x * x == beq_x, Aeq_u * u == beq_u
+            % Implemented as two inequalities per row and delegated to linear API
+            obj.check_setup();
+            
+            % Normalize beq inputs to column vectors for safety
+            if ~isempty(beq_x) && isrow(beq_x), beq_x = beq_x'; end
+            if ~isempty(beq_u) && isrow(beq_u), beq_u = beq_u'; end
+            
+            % Convert equalities to two inequalities and delegate to linear API
+            Alin_x = []; blin_x = [];
+            if ~isempty(Aeq_x)
+                Alin_x = [Aeq_x; -Aeq_x];
+                blin_x = [beq_x; -beq_x];
+            end
+            Alin_u = []; blin_u = [];
+            if ~isempty(Aeq_u)
+                Alin_u = [Aeq_u; -Aeq_u];
+                blin_u = [beq_u; -beq_u];
+            end
+            obj.set_linear_constraints(Alin_x, blin_x, Alin_u, blin_u);
         end
         
         function reset(obj)

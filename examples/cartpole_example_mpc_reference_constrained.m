@@ -26,8 +26,11 @@ u_max = 0.45;
 % Create solver
 solver = TinyMPC();
 
-% Setup solver with matrices and constraints
-solver.setup(A, B, Q, R, N, 'u_min', u_min, 'u_max', u_max);
+% Setup solver
+solver.setup(A, B, Q, R, N);
+
+% Set bounds explicitly 
+solver.set_bound_constraints([], [], u_min, u_max);
 
 % Set reference trajectory (goal must be another equilibrium position)
 x_ref = repmat([1.0; 0; 0; 0], 1, N);  % 4x20 matrix

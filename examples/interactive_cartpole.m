@@ -38,7 +38,8 @@ prob = TinyMPC();
 u_min = -5;  % Force constraint (min)
 u_max = 5;   % Force constraint (max)
 
-prob.setup(A, B, Q, R, N, 'u_min', u_min, 'u_max', u_max, 'rho', 0.1);
+prob.setup(A, B, Q, R, N, 'rho', 0.1);
+prob.set_bound_constraints([], [], u_min, u_max);
 
 % Set reference trajectory (origin stabilization)
 Xref = zeros(n, N);        % nx x N  

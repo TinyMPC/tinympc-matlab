@@ -88,10 +88,13 @@ controls_trajectory = solution.controls; % All predicted controls (1×19)
 ### Code Generation Workflow
 
 ```matlab
-% Setup solver with constraints
+% Setup solver
 solver = TinyMPC();
 u_min = -0.5; u_max = 0.5;  % Control bounds
-solver.setup(A, B, Q, R, N, 'u_min', u_min, 'u_max', u_max, 'rho', 1.0);
+solver.setup(A, B, Q, R, N, 'rho', 1.0);
+
+% Set bounds explicitly
+solver.set_bound_constraints([], [], u_min, u_max);
 
 % Generate C++ code
 solver.codegen('out');
@@ -147,6 +150,25 @@ solver.codegen_with_sensitivity(output_dir, dK, dP, dC1, dC2)
 % Compute sensitivity matrices using built-in autograd function
 [dK, dP, dC1, dC2] = solver.compute_sensitivity_autograd()
 ```
+
+### Constraints API
+
+```matlab
+% Bounds (box constraints)
+solver.set_bound_constraints(x_min, x_max, u_min, u_max);
+
+% Linear inequalities
+solver.set_linear_constraints(Alin_x, blin_x, Alin_u, blin_u);
+
+% Second-order cones (states first, then inputs)
+solver.set_cone_constraints(Acx, qcx, cx, Acu, qcu, cu);
+
+% Equality constraints (implemented as paired inequalities)
+% Aeq_x * x == beq_x, Aeq_u * u == beq_u
+solver.set_equality_constraints(Aeq_x, beq_x, Aeq_u, beq_u);
+```
+
+Each call auto-enables the corresponding constraint(s) in the C++ layer.
 
 ### Configuration
 

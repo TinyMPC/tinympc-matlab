@@ -26,8 +26,11 @@ u_max = 0.5;
 % Create solver
 solver = TinyMPC();
 
-% Setup solver with matrices and constraints
-solver.setup(A, B, Q, R, N, 'u_min', u_min, 'u_max', u_max, 'rho', 1.0, 'verbose', true);
+% Setup solver
+solver.setup(A, B, Q, R, N, 'rho', 1.0, 'verbose', true);
+
+% Set bounds explicitly 
+solver.set_bound_constraints([], [], u_min, u_max);
 
 % Generate code
 solver.codegen('out');

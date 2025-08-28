@@ -43,17 +43,12 @@ mxArray* eigen_to_matlab(const Eigen::MatrixXd& eigen_mat) {
     return mx_array;
 }
 
-// Setup function - initialize the solver (matches Python PyTinySolver constructor)
+// Setup function - initialize the solver
 void setup_solver(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
-    // Expected arguments: A, B, fdyn, Q, R, rho, nx, nu, N, x_min, x_max, u_min, u_max, verbose
-    if (nrhs != 14) {
-        mexErrMsgIdAndTxt("TinyMPC:InvalidInput", "Setup requires 14 input arguments");
+    // Expected arguments: A, B, fdyn, Q, R, rho, nx, nu, N, verbose
+    if (nrhs != 10) {
+        mexErrMsgIdAndTxt("TinyMPC:InvalidInput", "setup requires 10 input arguments: A, B, fdyn, Q, R, rho, nx, nu, N, verbose");
     }
-    
-    // Extract problem dimensions
-    int nx = (int)mxGetScalar(prhs[6]);
-    int nu = (int)mxGetScalar(prhs[7]);
-    int N = (int)mxGetScalar(prhs[8]);
     
     // Extract matrices
     auto A = matlab_to_eigen(prhs[0]);
@@ -63,13 +58,12 @@ void setup_solver(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
     auto R = matlab_to_eigen(prhs[4]);
     double rho = mxGetScalar(prhs[5]);
     
-    // Extract bound matrices
-    auto x_min = matlab_to_eigen(prhs[9]);
-    auto x_max = matlab_to_eigen(prhs[10]);
-    auto u_min = matlab_to_eigen(prhs[11]);
-    auto u_max = matlab_to_eigen(prhs[12]);
+    // Extract problem dimensions
+    int nx = (int)mxGetScalar(prhs[6]);
+    int nu = (int)mxGetScalar(prhs[7]);
+    int N = (int)mxGetScalar(prhs[8]);
     
-    int verbose = (int)mxGetScalar(prhs[13]);
+    int verbose = (int)mxGetScalar(prhs[9]);
     
     if (verbose) {
         mexPrintf("Setting up TinyMPC solver with nx=%d, nu=%d, N=%d, rho=%f\n", nx, nu, N, rho);
@@ -86,30 +80,12 @@ void setup_solver(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
         tinyMatrix Q_tiny = Q.cast<tinytype>();
         tinyMatrix R_tiny = R.cast<tinytype>();
         
-        // Setup solver (exactly like Python PyTinySolver constructor)
+        // Setup solver
         int status = tiny_setup(&solver_ptr, A_tiny, B_tiny, fdyn_tiny, Q_tiny, R_tiny, 
                                (tinytype)rho, nx, nu, N, verbose);
         
         if (status != 0) {
             mexErrMsgIdAndTxt("TinyMPC:SetupFailed", "tiny_setup failed with status %d", status);
-        }
-        
-        // Set bounds (exactly like Python PyTinySolver constructor)
-        tinyMatrix x_min_tiny = x_min.cast<tinytype>();
-        tinyMatrix x_max_tiny = x_max.cast<tinytype>();
-        tinyMatrix u_min_tiny = u_min.cast<tinytype>();
-        tinyMatrix u_max_tiny = u_max.cast<tinytype>();
-        
-        if (status == 0) {
-            status = tiny_set_bound_constraints(solver_ptr, x_min_tiny, x_max_tiny, u_min_tiny, u_max_tiny);
-        }
-        
-        if (status != 0) {
-            if (solver_ptr) {
-                // Clean up if needed
-                delete solver_ptr;
-            }
-            mexErrMsgIdAndTxt("TinyMPC:SetupFailed", "Bound constraints setup failed with status %d", status);
         }
         
         // Store solver (transfer ownership)
@@ -208,15 +184,9 @@ void set_u_ref(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
     }
 }
 
-// Set bound constraints (matches Python set_bound_constraints)
+// Set bound constraints
 void set_bound_constraints(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
-    if (nrhs != 5) {
-        mexErrMsgIdAndTxt("TinyMPC:InvalidInput", "set_bound_constraints requires 5 input arguments");
-    }
-    
-    if (!g_solver) {
-        mexErrMsgIdAndTxt("TinyMPC:NotInitialized", "Solver not initialized");
-    }
+    if (!g_solver) mexErrMsgIdAndTxt("TinyMPC:NotInitialized", "Solver not initialized");
     
     auto x_min = matlab_to_eigen(prhs[0]);
     auto x_max = matlab_to_eigen(prhs[1]);
@@ -229,16 +199,13 @@ void set_bound_constraints(int nlhs, mxArray* plhs[], int nrhs, const mxArray* p
     tinyMatrix u_min_tiny = u_min.cast<tinytype>();
     tinyMatrix u_max_tiny = u_max.cast<tinytype>();
     
-    // Use the API function (same as Python)
     int status = tiny_set_bound_constraints(g_solver.get(), x_min_tiny, x_max_tiny, u_min_tiny, u_max_tiny);
-    
-    if (status != 0) {
-        mexErrMsgIdAndTxt("TinyMPC:SetBoundConstraintsFailed", "tiny_set_bound_constraints failed with status %d", status);
-    }
-    
-    if (verbose) {
-        mexPrintf("Bound constraints set\n");
-    }
+    if (status != 0) mexErrMsgIdAndTxt("TinyMPC:SetBoundConstraintsFailed", "status %d", status);
+
+    // Auto-enable bound constraints after successful setting
+    g_solver->settings->en_state_bound = 1;
+    g_solver->settings->en_input_bound = 1;
+    if (verbose) mexPrintf("Bound constraints set\n");
 }
 
 // Solve the MPC problem (matches Python solve)
@@ -437,6 +404,79 @@ void set_cache_terms(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
     }
 }
 
+// Set linear constraints
+void set_linear_constraints(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
+    if (!g_solver) mexErrMsgIdAndTxt("TinyMPC:NotInitialized", "Solver not initialized");
+
+    auto Alin_x = matlab_to_eigen(prhs[0]).cast<tinytype>();
+    Eigen::MatrixXd blin_x_in = matlab_to_eigen(prhs[1]);
+    auto Alin_u = matlab_to_eigen(prhs[2]).cast<tinytype>();
+    Eigen::MatrixXd blin_u_in = matlab_to_eigen(prhs[3]);
+    // Flatten b vectors to column (accept 1xK or Kx1)
+    Eigen::Matrix<tinytype, Eigen::Dynamic, 1> blin_x = Eigen::Map<Eigen::VectorXd>(blin_x_in.data(), (int)blin_x_in.size()).cast<tinytype>();
+    Eigen::Matrix<tinytype, Eigen::Dynamic, 1> blin_u = Eigen::Map<Eigen::VectorXd>(blin_u_in.data(), (int)blin_u_in.size()).cast<tinytype>();
+    
+    int status = tiny_set_linear_constraints(g_solver.get(), Alin_x, blin_x, Alin_u, blin_u);
+    if (status != 0) mexErrMsgIdAndTxt("TinyMPC:SetLinearConstraintsFailed", "status %d", status);
+    
+    // Auto-enable linear constraints after successful setting
+    bool has_state_linear = (Alin_x.rows() > 0 && blin_x.rows() > 0);
+    bool has_input_linear = (Alin_u.rows() > 0 && blin_u.rows() > 0);
+    if (has_state_linear) {
+        g_solver->settings->en_state_linear = 1;
+    }
+    if (has_input_linear) {
+        g_solver->settings->en_input_linear = 1;
+    }
+}
+// Helper function to convert MATLAB array to Eigen VectorXi
+Eigen::VectorXi matlab_to_eigen_vectorxi(const mxArray* mx_array) {
+    size_t size = mxGetM(mx_array) * mxGetN(mx_array);
+    Eigen::VectorXi result(size);
+    
+    if (mxIsInt32(mx_array)) {
+        int32_t* data = (int32_t*)mxGetData(mx_array);
+        for (size_t i = 0; i < size; ++i) result(i) = data[i];
+    } else if (mxIsDouble(mx_array)) {
+        double* data = mxGetPr(mx_array);
+        for (size_t i = 0; i < size; ++i) result(i) = (int)round(data[i]);
+    } else {
+        mexErrMsgIdAndTxt("TinyMPC:InvalidInput", "Input must be int32 or double array");
+    }
+    return result;
+}
+
+// Set conic constraints (inputs first, then states)  
+void set_cone_constraints(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
+    if (!g_solver) mexErrMsgIdAndTxt("TinyMPC:NotInitialized", "Solver not initialized");
+    
+    // MATLAB public API: state-first, then input
+    auto Acx = matlab_to_eigen_vectorxi(prhs[0]);
+    auto qcx = matlab_to_eigen_vectorxi(prhs[1]);
+    Eigen::MatrixXd cx_in = matlab_to_eigen(prhs[2]);
+    auto Acu = matlab_to_eigen_vectorxi(prhs[3]);
+    auto qcu = matlab_to_eigen_vectorxi(prhs[4]);
+    Eigen::MatrixXd cu_in = matlab_to_eigen(prhs[5]);
+    // Flatten cu/cx to column vectors (accept 1xK or Kx1)
+    Eigen::VectorXd cx_vec = Eigen::Map<Eigen::VectorXd>(cx_in.data(), (int)cx_in.size());
+    Eigen::VectorXd cu_vec = Eigen::Map<Eigen::VectorXd>(cu_in.data(), (int)cu_in.size());
+    
+    // Core expects input-first, then state
+    int status = tiny_set_cone_constraints(g_solver.get(), Acu, qcu, cu_vec.cast<tinytype>(),
+                                           Acx, qcx, cx_vec.cast<tinytype>());
+    if (status != 0) mexErrMsgIdAndTxt("TinyMPC:SetConeConstraintsFailed", "status %d", status);
+    
+    // Auto-enable cone constraints after successful setting
+    bool has_state_cones = (Acx.size() > 0 && qcx.size() > 0 && cx_vec.size() > 0);
+    bool has_input_cones = (Acu.size() > 0 && qcu.size() > 0 && cu_vec.size() > 0);
+    if (has_state_cones) {
+        g_solver->settings->en_state_soc = 1;
+    }
+    if (has_input_cones) {
+        g_solver->settings->en_input_soc = 1;
+    }
+}
+
 // Code generation with sensitivity matrices (simplified - file operations moved to MATLAB)
 void codegen_with_sensitivity(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
     if (nrhs != 6) {
@@ -506,8 +546,8 @@ void reset_solver(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
 
 // Update settings (matches Python PyTinySolver::update_settings)
 void update_settings(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
-    if (nrhs != 11) {
-        mexErrMsgIdAndTxt("TinyMPC:InvalidInput", "update_settings requires 11 input arguments");
+    if (nrhs != 15) {
+        mexErrMsgIdAndTxt("TinyMPC:InvalidInput", "update_settings requires 15 input arguments");
     }
     
     if (!g_solver) {
@@ -521,11 +561,15 @@ void update_settings(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
     int check_termination = (int)mxGetScalar(prhs[3]);
     int en_state_bound = (int)mxGetScalar(prhs[4]);
     int en_input_bound = (int)mxGetScalar(prhs[5]);
-    int adaptive_rho = (int)mxGetScalar(prhs[6]);
-    double adaptive_rho_min = mxGetScalar(prhs[7]);
-    double adaptive_rho_max = mxGetScalar(prhs[8]);
-    int adaptive_rho_enable_clipping = (int)mxGetScalar(prhs[9]);
-    int verbose = (int)mxGetScalar(prhs[10]);
+    int en_state_soc = (int)mxGetScalar(prhs[6]);
+    int en_input_soc = (int)mxGetScalar(prhs[7]);
+    int en_state_linear = (int)mxGetScalar(prhs[8]);
+    int en_input_linear = (int)mxGetScalar(prhs[9]);
+    int adaptive_rho = (int)mxGetScalar(prhs[10]);
+    double adaptive_rho_min = mxGetScalar(prhs[11]);
+    double adaptive_rho_max = mxGetScalar(prhs[12]);
+    int adaptive_rho_enable_clipping = (int)mxGetScalar(prhs[13]);
+    int verbose = (int)mxGetScalar(prhs[14]);
     
     try {
         if (g_solver && g_solver->settings) {
@@ -536,6 +580,10 @@ void update_settings(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
             g_solver->settings->check_termination = check_termination;
             g_solver->settings->en_state_bound = en_state_bound;
             g_solver->settings->en_input_bound = en_input_bound;
+            g_solver->settings->en_state_soc = en_state_soc;
+            g_solver->settings->en_input_soc = en_input_soc;
+            g_solver->settings->en_state_linear = en_state_linear;
+            g_solver->settings->en_input_linear = en_input_linear;
             
             // Copy adaptive rho settings
             g_solver->settings->adaptive_rho = adaptive_rho;
@@ -629,6 +677,10 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
             update_settings(nlhs, plhs, nrhs-1, prhs+1);
         } else if (strcmp(func_name, "print_problem_data") == 0) {
             print_problem_data(nlhs, plhs, nrhs-1, prhs+1);
+        } else if (strcmp(func_name, "set_linear_constraints") == 0) {
+            set_linear_constraints(nlhs, plhs, nrhs-1, prhs+1);
+        } else if (strcmp(func_name, "set_cone_constraints") == 0) {
+            set_cone_constraints(nlhs, plhs, nrhs-1, prhs+1);
         } else {
             mexErrMsgIdAndTxt("TinyMPC:InvalidFunction", "Unknown function: %s", func_name);
         }
